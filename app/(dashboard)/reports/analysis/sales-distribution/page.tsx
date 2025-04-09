@@ -6,9 +6,6 @@ import Link from "next/link"
 import { formatCurrency } from "@/lib/utils/date"
 import ChartContainer from "./chart-container"
 
-// Elimina la importación dinámica de aquí
-// Elimina la configuración de runtime edge que está causando problemas
-
 export const dynamic = "force-dynamic"
 
 async function getSalesDistributionData() {
