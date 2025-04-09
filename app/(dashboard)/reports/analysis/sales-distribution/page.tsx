@@ -4,9 +4,21 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils/date"
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts"
+// Renombrar la importación de dynamic para evitar conflictos
+import nextDynamic from "next/dynamic"
 
+// Importar Recharts de manera dinámica para evitar problemas de SSR
+const RechartsComponent = nextDynamic(() => 
+  import("@/components/charts/sales-distribution-chart").catch(() => 
+    import("@/components/charts/fallback-chart")
+  ), {
+  ssr: false,
+  loading: () => <div className="flex h-[400px] items-center justify-center">Cargando gráfico...</div>
+})
+
+// Usar el nombre correcto para la configuración de Next.js
 export const dynamic = "force-dynamic"
+export const runtime = "edge" // Try using edge runtime which might handle the dependencies better
 
 async function getSalesDistributionData() {
   const supabase = createClient()
@@ -27,21 +39,26 @@ async function getSalesDistributionData() {
   }
 }
 
+interface SalesItem {
+  category: string
+  total_amount: number
+}
+
 export default async function SalesDistributionPage() {
-  const salesDistribution = await getSalesDistributionData()
+  const salesDistribution = await getSalesDistributionData() as SalesItem[]
 
   // Colores para las categorías
   const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8", "#82ca9d", "#ffc658", "#8dd1e1"]
 
   // Formatear datos para el gráfico
-  const chartData = salesDistribution.map((item, index) => ({
+  const chartData = salesDistribution.map((item: SalesItem, index: number) => ({
     name: item.category,
     value: item.total_amount,
     color: COLORS[index % COLORS.length],
   }))
 
   // Calcular el total de ventas
-  const totalSales = chartData.reduce((sum, item) => sum + item.value, 0)
+  const totalSales = chartData.reduce((sum: number, item: { value: number }) => sum + item.value, 0)
 
   return (
     <div className="space-y-6">
@@ -66,29 +83,7 @@ export default async function SalesDistributionPage() {
           </CardHeader>
           <CardContent>
             <div className="h-[400px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={true}
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                    outerRadius={120}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number) => formatCurrency(value)}
-                    labelFormatter={(label) => `Categoría: ${label}`}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+              <RechartsComponent chartData={chartData} />
             </div>
           </CardContent>
         </Card>
