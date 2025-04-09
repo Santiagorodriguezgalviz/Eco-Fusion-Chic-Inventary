@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, TrendingUp, AlertTriangle } from "lucide-react"
 import Link from "next/link"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
+// Eliminar la importación directa de recharts
+import InventoryChartWrapper from "@/components/charts/inventory-performance-chart-wrapper"
 
 export const dynamic = "force-dynamic"
 
@@ -78,24 +79,7 @@ export default async function InventoryPerformancePage() {
         <CardContent>
           <div className="h-[400px]">
             {chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 70 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="category" angle={-45} textAnchor="end" height={70} tick={{ fontSize: 12 }} />
-                  <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
-                  <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
-                  <Tooltip />
-                  <Legend />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="rotacion"
-                    name="Índice de Rotación"
-                    fill="#8884d8"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar yAxisId="right" dataKey="stock" name="Stock Promedio" fill="#82ca9d" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <InventoryChartWrapper chartData={chartData} />
             ) : (
               <div className="flex h-full items-center justify-center">
                 <p className="text-gray-500">No hay datos disponibles</p>
