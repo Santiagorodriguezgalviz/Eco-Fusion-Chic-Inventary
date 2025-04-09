@@ -4,21 +4,12 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils/date"
-// Renombrar la importación de dynamic para evitar conflictos
-import nextDynamic from "next/dynamic"
+import ChartContainer from "./chart-container"
 
-// Importar Recharts de manera dinámica para evitar problemas de SSR
-const RechartsComponent = nextDynamic(() => 
-  import("@/components/charts/sales-distribution-chart").catch(() => 
-    import("@/components/charts/fallback-chart")
-  ), {
-  ssr: false,
-  loading: () => <div className="flex h-[400px] items-center justify-center">Cargando gráfico...</div>
-})
+// Elimina la importación dinámica de aquí
+// Elimina la configuración de runtime edge que está causando problemas
 
-// Usar el nombre correcto para la configuración de Next.js
 export const dynamic = "force-dynamic"
-export const runtime = "edge" // Try using edge runtime which might handle the dependencies better
 
 async function getSalesDistributionData() {
   const supabase = createClient()
@@ -83,7 +74,7 @@ export default async function SalesDistributionPage() {
           </CardHeader>
           <CardContent>
             <div className="h-[400px]">
-              <RechartsComponent chartData={chartData} />
+              <ChartContainer chartData={chartData} />
             </div>
           </CardContent>
         </Card>
