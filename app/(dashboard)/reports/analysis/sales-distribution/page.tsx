@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils/date"
-import ChartContainer from "./chart-container"
+import ChartContainer from "@/components/charts/chart-container"
 
 export const dynamic = "force-dynamic"
 
