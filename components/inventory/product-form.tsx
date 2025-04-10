@@ -48,7 +48,7 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
     const price = Number.parseFloat(formData.get("price") as string)
     const cost_price = Number.parseFloat(formData.get("cost_price") as string)
     const image_url = (formData.get("image_url") as string) || null
-    const stock = Number.parseInt(formData.get("stock") as string) || 0  // Nuevo campo de stock
+    const stock = Number.parseInt(formData.get("stock") as string) || 0
 
     try {
       // Insert product
@@ -61,40 +61,40 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
           price,
           cost_price,
           image_url,
-          stock,  // Añadir el stock al producto
+          stock,
         })
         .select()
         .single()
 
       if (productError) throw productError
 
-      // Insert inventory for selected sizes
+      // Insert inventory for selected sizes but with zero stock
+      // We'll just track which sizes are available, not their quantities
       const selectedSizes = productSizes.filter((size) => size.selected)
 
       if (selectedSizes.length > 0) {
+        // Set a default stock of 0 for all sizes, since we're tracking total stock at product level
         const inventoryItems = selectedSizes.map((size) => ({
           product_id: productData.id,
           size_id: size.id,
-          stock: size.stock,
+          stock: 0, // Set to 0 since we're tracking at product level
         }))
 
         const { error: inventoryError } = await supabase.from("inventory").insert(inventoryItems)
 
         if (inventoryError) throw inventoryError
+        
+        // Check if total stock is low and create notification
+        if (stock < 5) {
+          // Import notification service
+          const { notificationService } = await import("@/lib/services/notification-service")
 
-        // Verificar si hay productos con stock bajo y crear notificaciones
-        for (const size of selectedSizes) {
-          if (size.selected && size.stock < 5) {
-            // Importar el servicio de notificaciones
-            const { notificationService } = await import("@/lib/services/notification-service")
-
-            // Crear notificación de stock bajo
-            await notificationService.createLowStockNotification(
-              productData.name,
-              sizes.find((s) => s.id === size.id)?.name || "Desconocida",
-              size.stock,
-            )
-          }
+          // Create low stock notification for the product
+          await notificationService.createLowStockNotification(
+            productData.name,
+            "General", // No specific size
+            stock
+          )
         }
       }
 
@@ -117,6 +117,7 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
     }
   }
 
+  // Modify the handleSizeToggle function to not deal with stock
   const handleSizeToggle = (id: string) => {
     setProductSizes((prev) => prev.map((size) => (size.id === id ? { ...size, selected: !size.selected } : size)))
   }
@@ -196,21 +197,7 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
                     />
                     <Label htmlFor={`size-${size.id}`}>{size.name}</Label>
                   </div>
-                  {size.selected && (
-                    <div className="pt-2">
-                      <Label htmlFor={`stock-${size.id}`} className="text-xs">
-                        Stock
-                      </Label>
-                      <Input
-                        id={`stock-${size.id}`}
-                        type="number"
-                        min="0"
-                        value={size.stock}
-                        onChange={(e) => handleStockChange(size.id, e.target.value)}
-                        className="mt-1"
-                      />
-                    </div>
-                  )}
+                  {/* Remove the stock input for individual sizes */}
                 </div>
               ))}
             </div>
