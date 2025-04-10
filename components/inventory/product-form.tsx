@@ -48,6 +48,7 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
     const price = Number.parseFloat(formData.get("price") as string)
     const cost_price = Number.parseFloat(formData.get("cost_price") as string)
     const image_url = (formData.get("image_url") as string) || null
+    const stock = Number.parseInt(formData.get("stock") as string) || 0  // Nuevo campo de stock
 
     try {
       // Insert product
@@ -60,6 +61,7 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
           price,
           cost_price,
           image_url,
+          stock,  // Añadir el stock al producto
         })
         .select()
         .single()
@@ -168,6 +170,12 @@ export function ProductForm({ sizes }: { sizes: { id: string; name: string }[] }
               <Label htmlFor="cost_price">Precio de costo</Label>
               <Input id="cost_price" name="cost_price" type="number" min="0" step="1000" required />
             </div>
+          </div>
+
+          {/* Nuevo campo de stock general */}
+          <div className="space-y-2">
+            <Label htmlFor="stock">Cantidad en stock</Label>
+            <Input id="stock" name="stock" type="number" min="0" defaultValue="0" />
           </div>
 
           <div className="space-y-2">
