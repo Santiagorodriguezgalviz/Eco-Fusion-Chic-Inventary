@@ -31,12 +31,10 @@ async function getOrders(searchParams: { filter?: string }) {
           .from("order_items")
           .select(`
             product_id,
-            size_id,
             quantity, 
             cost_price, 
             subtotal,
-            products (name),
-            sizes (name)
+            products (name)
           `)
           .eq("order_id", order.id)
 
@@ -50,9 +48,8 @@ async function getOrders(searchParams: { filter?: string }) {
 
         const items = itemsData.map((item) => ({
           product_id: item.product_id,
-          size_id: item.size_id,
           product_name: item.products.name,
-          size_name: item.sizes.name,
+          // Remove size_name reference
           quantity: item.quantity,
           cost_price: item.cost_price,
           subtotal: item.subtotal,

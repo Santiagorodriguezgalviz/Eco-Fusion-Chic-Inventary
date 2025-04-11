@@ -31,9 +31,8 @@ interface Order {
   arrival_date: string | null
   items: {
     product_id: string
-    size_id: string
     product_name: string
-    size_name: string
+    // Remove size_id and size_name
     quantity: number
     cost_price: number
     subtotal: number
@@ -85,16 +84,25 @@ export function OrdersTable({
         // Get order items for each order
         const ordersWithItems = await Promise.all(
           ordersData.map(async (order) => {
+            // Define a proper type for the joined data
+            interface OrderItemWithProduct {
+              product_id: string;
+              quantity: number;
+              cost_price: number;
+              subtotal: number;
+              products: {
+                name: string;
+              };
+            }
+
             const { data: itemsData, error: itemsError } = await supabase
               .from("order_items")
               .select(`
                 product_id,
-                size_id,
                 quantity, 
                 cost_price, 
                 subtotal,
-                products (name),
-                sizes (name)
+                products (name)
               `)
               .eq("order_id", order.id)
 
@@ -106,11 +114,12 @@ export function OrdersTable({
               }
             }
 
-            const items = itemsData.map((item) => ({
+            // Cast itemsData to the correct type
+            const typedItemsData = itemsData as unknown as OrderItemWithProduct[];
+            
+            const items = typedItemsData.map((item) => ({
               product_id: item.product_id,
-              size_id: item.size_id,
-              product_name: item.products.name,
-              size_name: item.sizes.name,
+              product_name: item.products.name || "Producto sin nombre",
               quantity: item.quantity,
               cost_price: item.cost_price,
               subtotal: item.subtotal,
@@ -162,7 +171,8 @@ export function OrdersTable({
     setIsUpdating(true)
 
     try {
-      const { error } = await supabase
+      // First update the order status
+      const { error: orderError } = await supabase
         .from("orders")
         .update({
           status: "completed",
@@ -170,62 +180,87 @@ export function OrdersTable({
         })
         .eq("id", selectedOrder.id)
 
-      if (error) throw error
+      if (orderError) {
+        console.error("Error updating order status:", orderError)
+        throw orderError
+      }
 
       // Update inventory for each item
       for (const item of selectedOrder.items) {
-        // Find the inventory record
-        const { data: inventoryData, error: findError } = await supabase
-          .from("inventory")
-          .select("id, stock")
-          .eq("product_id", item.product_id)
-          .eq("size_id", item.size_id)
-          .single()
+        try {
+          // First check if there's an inventory record with null size_id
+          const { data: inventoryData, error: findError } = await supabase
+            .from("inventory")
+            .select("id, stock")
+            .eq("product_id", item.product_id)
+            .is("size_id", null)
+            .maybeSingle() 
 
-        if (findError) {
-          if (findError.code === "PGRST116") {
-            // Record not found, create new inventory record
-            const { error: insertError } = await supabase.from("inventory").insert({
-              product_id: item.product_id,
-              size_id: item.size_id,
-              stock: item.quantity,
-            })
-
-            if (insertError) throw insertError
-          } else {
+          if (findError) {
+            console.error("Error finding inventory:", findError)
             throw findError
           }
-        } else {
-          // Update existing inventory record
-          const { error: updateError } = await supabase
-            .from("inventory")
-            .update({
-              stock: inventoryData.stock + item.quantity,
-            })
-            .eq("id", inventoryData.id)
 
-          if (updateError) throw updateError
+          if (inventoryData) {
+            // Update existing inventory record
+            const { error: updateError } = await supabase
+              .from("inventory")
+              .update({
+                stock: inventoryData.stock + item.quantity,
+              })
+              .eq("id", inventoryData.id)
+
+            if (updateError) {
+              console.error("Error updating inventory:", updateError)
+              throw updateError
+            }
+          } else {
+            // Create new inventory record
+            const { error: insertError } = await supabase
+              .from("inventory")
+              .insert({
+                product_id: item.product_id,
+                size_id: null,
+                stock: item.quantity,
+              })
+
+            if (insertError) {
+              console.error("Error inserting inventory:", insertError)
+              throw insertError
+            }
+          }
+        } catch (itemError) {
+          console.error(`Error updating inventory for item ${item.product_id}:`, itemError)
+          // Continue with other items even if one fails
         }
       }
 
       addNotification("Pedido actualizado", "El pedido ha sido marcado como recibido", "success")
 
-      // Actualizar la lista de pedidos
+      // Update the orders list
       setOrders((prevOrders) =>
         prevOrders.map((order) =>
           order.id === selectedOrder.id
             ? { ...order, status: "completed", arrival_date: new Date().toISOString() }
             : order,
-        ),
+        )
       )
 
       router.refresh()
       setSelectedOrder(null)
     } catch (error) {
+      // Improved error logging with more details
       console.error("Error updating order:", error)
+      
+      // Get more detailed error information
+      let errorMessage = "Ocurrió un error al actualizar el pedido";
+      if (error && typeof error === 'object' && 'message' in error) {
+        errorMessage += `: ${error.message}`;
+      }
+      
       toast({
         title: "Error",
-        description: "Ocurrió un error al actualizar el pedido",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -241,7 +276,16 @@ export function OrdersTable({
   const handleDownloadPdf = () => {
     if (!selectedOrder) return
 
-    const doc = generateOrderReportPDF(selectedOrder as OrderData)
+    // Create a modified version of selectedOrder that matches OrderData structure
+    const orderDataForPdf: OrderData = {
+      ...selectedOrder,
+      items: selectedOrder.items.map(item => ({
+        ...item,
+        size_name: "N/A" // Add the missing size_name property
+      }))
+    }
+
+    const doc = generateOrderReportPDF(orderDataForPdf)
     downloadPDF(doc, `pedido-${selectedOrder.reference || selectedOrder.id}.pdf`)
 
     addNotification("PDF generado", "El reporte del pedido ha sido descargado correctamente", "success")
@@ -258,7 +302,10 @@ export function OrdersTable({
       status: "all",
       created_at: new Date().toISOString(),
       arrival_date: null,
-      items: orders.flatMap((order) => order.items),
+      items: orders.flatMap((order) => order.items.map(item => ({
+        ...item,
+        size_name: "N/A" // Add the missing size_name property
+      }))),
     }
 
     const doc = generateOrderReportPDF(combinedOrder)
@@ -416,7 +463,13 @@ export function OrdersTable({
                           </Badge>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm font-medium">{order.items.length} productos</td>
+                      <td className="px-4 py-3 text-sm">
+                        {/* Show product names instead of just count */}
+                        <div className="max-w-[200px] truncate">
+                          {order.items.map(item => item.product_name).join(", ")}
+                        </div>
+                        <div className="text-xs text-gray-500">{order.items.length} productos</div>
+                      </td>
                       <td className="px-4 py-3 text-sm font-semibold text-emerald-700">
                         {formatCurrency(order.total_cost)}
                       </td>
@@ -519,7 +572,7 @@ export function OrdersTable({
             <ul className="mt-2 space-y-1">
               {selectedOrder?.items.map((item, index) => (
                 <li key={index} className="text-sm">
-                  {item.product_name} ({item.size_name}) x{item.quantity}
+                  {item.product_name} x{item.quantity} - {formatCurrency(item.cost_price)} c/u
                 </li>
               ))}
             </ul>
@@ -555,9 +608,15 @@ export function OrdersTable({
               <li>
                 <span className="font-medium">Total:</span> {selectedOrder && formatCurrency(selectedOrder.total_cost)}
               </li>
-              <li>
-                <span className="font-medium">Productos:</span> {selectedOrder?.items.length || 0}
-              </li>
+            </ul>
+            
+            <p className="mt-4 mb-2 font-medium">Productos:</p>
+            <ul className="space-y-1 text-sm">
+              {selectedOrder?.items.map((item, index) => (
+                <li key={index}>
+                  {item.product_name} x{item.quantity} - {formatCurrency(item.cost_price)} c/u
+                </li>
+              ))}
             </ul>
           </div>
           <DialogFooter>

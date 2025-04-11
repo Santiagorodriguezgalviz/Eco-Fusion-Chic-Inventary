@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
+import { formatCurrency, formatDateTime } from "@/lib/utils/date"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
+import { ArrowLeft, FileText } from "lucide-react"
 import { notFound } from "next/navigation"
-import { OrderDetails } from "@/components/orders/order-details"
 
 export const dynamic = "force-dynamic"
 
@@ -14,33 +17,35 @@ async function getOrder(id: string) {
       .eq("id", id)
       .single()
 
-    if (error) throw error
+    if (error || !order) {
+      console.error("Error fetching order:", error)
+      return null
+    }
 
     // Get order items
     const { data: itemsData, error: itemsError } = await supabase
       .from("order_items")
       .select(`
-        id,
         product_id,
-        size_id,
         quantity, 
         cost_price, 
         subtotal,
-        products (id, name, category, image_url),
-        sizes (id, name)
+        products (name)
       `)
       .eq("order_id", id)
 
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      console.error("Error fetching order items:", itemsError)
+      return {
+        ...order,
+        items: [],
+      }
+    }
 
+    // Add null check for products to prevent "Cannot read properties of null" error
     const items = itemsData.map((item) => ({
-      id: item.id,
       product_id: item.product_id,
-      size_id: item.size_id,
-      product_name: item.products.name,
-      product_category: item.products.category,
-      product_image: item.products.image_url,
-      size_name: item.sizes.name,
+      product_name: item.products?.name || "Producto desconocido", // Add fallback
       quantity: item.quantity,
       cost_price: item.cost_price,
       subtotal: item.subtotal,
@@ -51,7 +56,7 @@ async function getOrder(id: string) {
       items,
     }
   } catch (error) {
-    console.error("Error fetching order:", error)
+    console.error("Error in getOrder:", error)
     return null
   }
 }
@@ -63,5 +68,91 @@ export default async function OrderDetailsPage({ params }: { params: { id: strin
     notFound()
   }
 
-  return <OrderDetails order={order} />
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <Link href="/orders" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver a pedidos
+          </Link>
+          <h1 className="text-3xl font-bold tracking-tight mt-2">
+            Pedido {order.reference || <span className="text-muted-foreground">Sin referencia</span>}
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/orders/pdf/${order.id}`} target="_blank">
+              <FileText className="mr-2 h-4 w-4" />
+              Ver PDF
+            </Link>
+          </Button>
+          {order.status === "pending" && (
+            <Button asChild className="bg-emerald-600 hover:bg-emerald-700">
+              <Link href={`/orders/edit/${order.id}`}>Editar pedido</Link>
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6 space-y-4">
+            <h3 className="text-lg font-semibold">Detalles del pedido</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Estado</p>
+                <p className="text-sm font-medium">
+                  {order.status === "pending" ? "Pendiente" : "Recibido"}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Fecha de creación</p>
+                <p className="text-sm font-medium">{formatDateTime(order.created_at)}</p>
+              </div>
+              {order.arrival_date && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Fecha de recepción</p>
+                  <p className="text-sm font-medium">{formatDateTime(order.arrival_date)}</p>
+                </div>
+              )}
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total</p>
+                <p className="text-sm font-medium">{formatCurrency(order.total_cost)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6 space-y-4">
+            <h3 className="text-lg font-semibold">Productos</h3>
+            <div className="space-y-4">
+              {order.items.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No hay productos en este pedido</p>
+              ) : (
+                <div className="space-y-2">
+                  {order.items.map((item, index) => (
+                    <div key={index} className="flex justify-between items-center py-2 border-b last:border-0">
+                      <div>
+                        <p className="font-medium">{item.product_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {item.quantity} x {formatCurrency(item.cost_price)}
+                        </p>
+                      </div>
+                      <p className="font-medium">{formatCurrency(item.subtotal)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-4 border-t">
+                <p className="font-semibold">Total</p>
+                <p className="font-semibold">{formatCurrency(order.total_cost)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }

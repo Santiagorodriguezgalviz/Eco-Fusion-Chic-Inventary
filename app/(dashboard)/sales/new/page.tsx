@@ -3,47 +3,21 @@ import { SaleForm } from "@/components/sales/sale-form"
 
 export const dynamic = "force-dynamic"
 
-async function getProductsWithSizes() {
+async function getProducts() {
   const supabase = createClient()
 
-  // Get all products
-  const { data: products, error } = await supabase.from("products").select("id, name, price").order("name")
+  // Get all products with stock
+  const { data: products, error } = await supabase
+    .from("products")
+    .select("id, name, price, stock")
+    .order("name")
 
   if (error) {
     console.error("Error fetching products:", error)
     return []
   }
 
-  // Get inventory for each product
-  const productsWithSizes = await Promise.all(
-    products.map(async (product) => {
-      const { data: inventoryData, error: inventoryError } = await supabase
-        .from("inventory")
-        .select("size_id, stock, sizes(id, name)")
-        .eq("product_id", product.id)
-
-      if (inventoryError) {
-        console.error("Error fetching inventory:", inventoryError)
-        return {
-          ...product,
-          sizes: [],
-        }
-      }
-
-      const sizes = inventoryData.map((item) => ({
-        id: item.size_id,
-        name: item.sizes.name,
-        stock: item.stock,
-      }))
-
-      return {
-        ...product,
-        sizes,
-      }
-    }),
-  )
-
-  return productsWithSizes
+  return products
 }
 
 async function getCustomers() {
@@ -60,7 +34,7 @@ async function getCustomers() {
 }
 
 export default async function NewSalePage() {
-  const products = await getProductsWithSizes()
+  const products = await getProducts()
   const customers = await getCustomers()
 
   return (

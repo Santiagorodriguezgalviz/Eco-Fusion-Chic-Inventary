@@ -184,7 +184,7 @@ export interface Database {
           id: string
           order_id: string
           product_id: string
-          size_id: string
+          // Removed size_id
           quantity: number
           cost_price: number
           subtotal: number
@@ -193,7 +193,7 @@ export interface Database {
           id?: string
           order_id: string
           product_id: string
-          size_id: string
+          // Removed size_id
           quantity: number
           cost_price: number
           subtotal: number
@@ -202,7 +202,7 @@ export interface Database {
           id?: string
           order_id?: string
           product_id?: string
-          size_id?: string
+          // Removed size_id
           quantity?: number
           cost_price?: number
           subtotal?: number

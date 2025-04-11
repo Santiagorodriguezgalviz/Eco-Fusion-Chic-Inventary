@@ -1452,39 +1452,40 @@ export function generateSalesReportHTML(sales: SaleData[], date: string): string
 
 // Función para enviar factura por WhatsApp
 export function sendInvoiceToWhatsApp(sale: SaleData): string {
-  if (!sale.customer || !sale.customer.phone) {
-    throw new Error("El cliente no tiene número de teléfono registrado")
-  }
-
-  // Crear mensaje de WhatsApp
-  let message = `*FACTURA ECO FUSION CHIC*
-
-`
-  message += `*Factura:* ${sale.invoice_number}
-`
-  message += `*Fecha:* ${formatDateTime(sale.created_at)}
-`
-  message += `*Cliente:* ${sale.customer.name}
-`
-  message += `*Identificación:* ${sale.customer.identification}
-
-`
-  message += `*Productos:*
-`
-
-  sale.items.forEach((item) => {
-    message += `- ${item.product_name} (${item.size_name}) x${item.quantity}: ${formatCurrency(item.subtotal)}
-`
+  const { customer, invoice_number, created_at, total_amount, items } = sale
+  
+  // Format the date
+  const date = new Date(created_at)
+  const formattedDate = date.toLocaleDateString('es-ES', { 
+    day: '2-digit', 
+    month: '2-digit', 
+    year: 'numeric' 
+  }) + ', ' + date.toLocaleTimeString('es-ES', { 
+    hour: '2-digit', 
+    minute: '2-digit' 
   })
-
-  message += `
-*Total:* ${formatCurrency(sale.total_amount)}`
-
-  // Formatear número de teléfono (eliminar cualquier carácter que no sea dígito)
-  const phone = sale.customer.phone.replace(/\D/g, "")
-
-  // Crear URL de WhatsApp
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+  
+  // Format the products list - remove the (undefined) text
+  const productsText = items.map(item => {
+    // Clean product name and ensure it doesn't show undefined
+    const productName = item.product_name || "Producto sin nombre"
+    return `* ${productName} x${item.quantity}: ${formatCurrency(item.price)}`
+  }).join('\n')
+  
+  // Create the message
+  const message = `*FACTURA ECO FUSION CHIC*\n\n` +
+    `*Factura:* ${invoice_number}\n` +
+    `*Fecha:* ${formattedDate}\n` +
+    `*Cliente:* ${customer?.name || 'Cliente no registrado'}\n` +
+    `*Identificación:* ${customer?.identification || 'N/A'}\n\n` +
+    `*Productos:*\n${productsText}\n\n` +
+    `*Total:* ${formatCurrency(total_amount)}`
+  
+  // Encode the message for WhatsApp
+  const encodedMessage = encodeURIComponent(message)
+  const phoneNumber = customer?.phone?.replace(/\D/g, '') || ''
+  
+  return `https://wa.me/${phoneNumber}?text=${encodedMessage}`
 }
 
 // Función para descargar PDF

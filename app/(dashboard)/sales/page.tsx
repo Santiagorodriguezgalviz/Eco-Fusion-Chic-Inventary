@@ -44,8 +44,7 @@ async function getSales(searchParams: { filter?: string }) {
             quantity, 
             price, 
             subtotal,
-            products (name),
-            sizes (name)
+            products (name)
           `)
           .eq("sale_id", sale.id)
 
@@ -60,7 +59,6 @@ async function getSales(searchParams: { filter?: string }) {
 
         const items = itemsData.map((item) => ({
           product_name: item.products.name,
-          size_name: item.sizes.name,
           quantity: item.quantity,
           price: item.price,
           subtotal: item.subtotal,

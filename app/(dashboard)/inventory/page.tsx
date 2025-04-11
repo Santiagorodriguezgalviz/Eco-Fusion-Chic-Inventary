@@ -9,7 +9,7 @@ async function getProducts() {
   // Get all products
   const { data: products, error } = await supabase
     .from("products")
-    .select("id, name, category, price, cost_price")
+    .select("id, name, category, price, cost_price, stock") // Add stock to the query
     .order("name")
 
   if (error) {
@@ -33,8 +33,9 @@ async function getProducts() {
         }
       }
 
-      const inventory = inventoryData.map((item) => ({
-        size: item.sizes.name,
+      // Solución: Verificar si sizes existe y manejarlo correctamente
+      const inventory = inventoryData.map((item: any) => ({
+        size: item.sizes?.name || 'Sin talla',
         stock: item.stock,
       }))
 

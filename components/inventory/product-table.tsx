@@ -41,6 +41,7 @@ interface Product {
   category: string
   price: number
   cost_price: number
+  stock?: number // Add stock to the Product interface
   inventory: {
     size: string
     stock: number
@@ -69,7 +70,7 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
     try {
       const { data: productData, error: productError } = await supabase
         .from("products")
-        .select("id, name, category, price, cost_price")
+        .select("id, name, category, price, cost_price, stock") // Add stock to the query
         .eq("id", productId)
         .single()
 
@@ -83,8 +84,9 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
 
       if (inventoryError) throw inventoryError
 
-      const inventory = inventoryData.map((item) => ({
-        size: item.sizes.name,
+      // Corregir el acceso a la propiedad sizes.name
+      const inventory = inventoryData.map((item: any) => ({
+        size: item.sizes?.name || 'Sin talla',
         stock: item.stock,
       }))
 
@@ -130,32 +132,40 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
   })
 
   // Suscripción en tiempo real a cambios en inventario
+  // Fix for the realtime subscription payload typing
   useRealtimeSubscription({
     table: "inventory",
     event: ["INSERT", "UPDATE", "DELETE"],
     onEvent: (payload) => {
       // Actualizar el producto relacionado
-      if (payload.new?.product_id || payload.old?.product_id) {
-        const productId = payload.new?.product_id || payload.old?.product_id
-        fetchProductDetails(productId).then((updatedProduct) => {
-          if (updatedProduct) {
-            setProducts((prev) => prev.map((product) => (product.id === updatedProduct.id ? updatedProduct : product)))
-
-            // Notificar si el stock es bajo
-            if (payload.eventType === "UPDATE" && payload.new.stock < 5) {
-              const product = products.find((p) => p.id === productId)
-              if (product) {
-                addNotification(
-                  "Stock bajo",
-                  `El producto "${product.name}" tiene stock bajo (${payload.new.stock} unidades)`,
-                  "warning",
-                )
+      if (payload.new && 'product_id' in payload.new || payload.old && 'product_id' in payload.old) {
+        const productId = (payload.new && 'product_id' in payload.new) 
+          ? payload.new.product_id 
+          : (payload.old && 'product_id' in payload.old) 
+            ? payload.old.product_id 
+            : null;
+            
+        if (productId) {
+          fetchProductDetails(productId).then((updatedProduct) => {
+            if (updatedProduct) {
+              setProducts((prev) => prev.map((product) => (product.id === updatedProduct.id ? updatedProduct : product)))
+  
+              // Notificar si el stock es bajo
+              if (payload.eventType === "UPDATE" && 'stock' in payload.new && payload.new.stock < 5) {
+                const product = products.find((p) => p.id === productId)
+                if (product) {
+                  addNotification(
+                    "Stock bajo",
+                    `El producto "${product.name}" tiene stock bajo (${payload.new.stock} unidades)`,
+                    "warning",
+                  )
+                }
               }
             }
-          }
-        })
+          })
+        }
       }
-    },
+    }
   })
 
   // Aplicar filtros a los productos
@@ -239,7 +249,12 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
   // Obtener categorías únicas para el filtro
   const categories = Array.from(new Set(initialProducts ? initialProducts.map((product) => product.category) : []))
 
-  const columns = [
+  // Fix for the columns type issue
+  const columns: {
+    header: string;
+    accessorKey: keyof Product | ((row: Product) => any);
+    cell?: ((row: Product) => React.ReactNode);
+  }[] = [
     {
       header: "Nombre",
       accessorKey: "name",
@@ -260,28 +275,22 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
       cell: (row: Product) => formatCurrency(row.cost_price),
     },
     {
-      header: "Tallas / Stock",
-      accessorKey: (row: Product) => {
-        if (!row.inventory) return ""
-        return row.inventory.map((i) => `${i.size}: ${i.stock}`).join(", ")
-      },
+      header: "Stock",
+      accessorKey: "stock",
       cell: (row: Product) => (
         <div className="flex flex-wrap gap-1">
-          {row.inventory &&
-            row.inventory.map((item, index) => (
-              <span
-                key={index}
-                className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                  item.stock < 5 ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"
-                }`}
-              >
-                {item.size}: {item.stock}
-              </span>
-            ))}
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+              (row.stock || 0) < 5 ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"
+            }`}
+          >
+            {row.stock || 0}
+          </span>
         </div>
       ),
     },
-  ]
+    // Removed the "Tallas / Stock" column
+  ];
 
   return (
     <>

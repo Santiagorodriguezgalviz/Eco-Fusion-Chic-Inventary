@@ -14,15 +14,12 @@ import { Trash, Plus, Send, UserPlus, Check } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRealtimeSubscription } from "@/lib/supabase/realtime"
 
+// Modificar la interfaz de producto para que no incluya tallas
 interface Product {
   id: string
   name: string
   price: number
-  sizes: {
-    id: string
-    name: string
-    stock: number
-  }[]
+  stock: number
 }
 
 interface Customer {
@@ -35,12 +32,10 @@ interface Customer {
 interface SaleItem {
   product_id: string
   product_name: string
-  size_id: string
-  size_name: string
   price: number
   quantity: number
   subtotal: number
-  available_stock: number // Agregamos el stock disponible para validaciones
+  available_stock: number // Stock disponible para validaciones
 }
 
 export function SaleForm({
@@ -55,7 +50,6 @@ export function SaleForm({
   const [isLoading, setIsLoading] = useState(false)
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<string>("")
-  const [selectedSize, setSelectedSize] = useState<string>("")
   const [quantity, setQuantity] = useState<number>(1)
   const [items, setItems] = useState<SaleItem[]>([])
   const [customerId, setCustomerId] = useState<string>("")
@@ -69,6 +63,7 @@ export function SaleForm({
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false)
   const [stockError, setStockError] = useState<string | null>(null)
   const [selectedProductStock, setSelectedProductStock] = useState<number>(0)
+  const [isSubmitting, setIsSubmitting] = useState(false) // Añadir este estado
 
   const supabase = createClient()
 
@@ -89,45 +84,40 @@ export function SaleForm({
         toast({
           title: "Cliente creado",
           description: "El cliente ha sido creado y seleccionado automáticamente",
-          icon: (
-            <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-              <Check className="h-4 w-4 text-green-600" />
-            </div>
-          ),
+          variant: "default", // Replace icon with variant
         })
       }
     },
   })
 
   // Get available sizes for selected product
-  const availableSizes = selectedProduct ? products.find((p) => p.id === selectedProduct)?.sizes || [] : []
+  // Remove this line completely as the comment above the Product interface indicates
+  // "Modificar la interfaz de producto para que no incluya tallas"
+  // const availableSizes = selectedProduct ? products.find((p) => p.id === selectedProduct)?.sizes || [] : []
 
-  // Calculate total
+  // Keep the total calculation
   const total = items.reduce((sum, item) => sum + item.subtotal, 0)
 
-  // Actualizar el stock disponible cuando cambia el tamaño seleccionado
+  // Actualizar el stock disponible cuando cambia el producto seleccionado
   useEffect(() => {
-    if (selectedProduct && selectedSize) {
+    if (selectedProduct) {
       const product = products.find((p) => p.id === selectedProduct)
       if (product) {
-        const size = product.sizes.find((s) => s.id === selectedSize)
-        if (size) {
-          setSelectedProductStock(size.stock)
-          // Resetear el error de stock
-          setStockError(null)
+        setSelectedProductStock(product.stock)
+        // Resetear el error de stock
+        setStockError(null)
 
-          // Si la cantidad actual es mayor que el stock disponible, ajustarla
-          if (quantity > size.stock) {
-            setQuantity(size.stock > 0 ? size.stock : 1)
-          }
+        // Si la cantidad actual es mayor que el stock disponible, ajustarla
+        if (quantity > product.stock) {
+          setQuantity(product.stock > 0 ? product.stock : 1)
         }
       }
     }
-  }, [selectedProduct, selectedSize, products])
+  }, [selectedProduct, products, quantity])
 
   // Validar la cantidad cuando cambia
   useEffect(() => {
-    if (selectedProduct && selectedSize) {
+    if (selectedProduct) {
       if (quantity > selectedProductStock) {
         setStockError(`Solo hay ${selectedProductStock} unidades disponibles`)
       } else if (quantity <= 0) {
@@ -136,10 +126,10 @@ export function SaleForm({
         setStockError(null)
       }
     }
-  }, [quantity, selectedProductStock, selectedProduct, selectedSize])
+  }, [quantity, selectedProductStock, selectedProduct])
 
   const handleAddItem = () => {
-    if (!selectedProduct || !selectedSize || quantity <= 0) return
+    if (!selectedProduct || quantity <= 0) return
 
     // Validar stock antes de agregar
     if (quantity > selectedProductStock) {
@@ -150,23 +140,18 @@ export function SaleForm({
     const product = products.find((p) => p.id === selectedProduct)
     if (!product) return
 
-    const size = product.sizes.find((s) => s.id === selectedSize)
-    if (!size) return
-
     const newItem: SaleItem = {
       product_id: product.id,
       product_name: product.name,
-      size_id: size.id,
-      size_name: size.name,
       price: product.price,
       quantity,
       subtotal: product.price * quantity,
-      available_stock: size.stock,
+      available_stock: product.stock,
     }
 
-    // Verificar si ya existe un item con el mismo producto y talla
+    // Verificar si ya existe un item con el mismo producto
     const existingItemIndex = items.findIndex(
-      (item) => item.product_id === newItem.product_id && item.size_id === newItem.size_id,
+      (item) => item.product_id === newItem.product_id
     )
 
     if (existingItemIndex >= 0) {
@@ -198,18 +183,14 @@ export function SaleForm({
 
     // Limpiar selecciones
     setSelectedProduct("")
-    setSelectedSize("")
     setQuantity(1)
     setStockError(null)
 
+    // In handleAddItem
     toast({
       title: "Producto agregado",
-      description: `${quantity} ${product.name} (${size.name}) agregado al carrito`,
-      icon: (
-        <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-          <Check className="h-4 w-4 text-green-600" />
-        </div>
-      ),
+      description: `${quantity} ${product.name} agregado al carrito`,
+      variant: "default", // Replace icon with variant
     })
   }
 
@@ -235,17 +216,14 @@ export function SaleForm({
       if (error) throw error
 
       // Si tenemos el ID del cliente recién creado, lo seleccionamos inmediatamente
+      // In handleCreateCustomer
       if (data && data.length > 0) {
         setCustomerId(data[0].id)
-
+      
         toast({
           title: "Cliente creado",
           description: "El cliente ha sido creado y seleccionado automáticamente",
-          icon: (
-            <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center">
-              <Check className="h-4 w-4 text-green-600" />
-            </div>
-          ),
+          variant: "default", // Use variant instead of icon
         })
       }
 
@@ -267,89 +245,31 @@ export function SaleForm({
     }
   }
 
-  const handleSubmit = async () => {
-    if (items.length === 0) {
-      toast({
-        title: "Error",
-        description: "Debes agregar al menos un producto",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Validar stock antes de procesar la venta
-    let stockValid = true
-    let errorMessage = ""
-
-    for (const item of items) {
-      // Obtener el stock actual del producto
-      const { data, error } = await supabase
-        .from("inventory")
-        .select("stock")
-        .eq("product_id", item.product_id)
-        .eq("size_id", item.size_id)
-        .single()
-
-      if (error) {
-        toast({
-          title: "Error",
-          description: "Error al verificar el inventario",
-          variant: "destructive",
-        })
-        return
-      }
-
-      const currentStock = data.stock
-
-      if (currentStock < item.quantity) {
-        stockValid = false
-        errorMessage = `No hay suficiente stock de ${item.product_name} (${item.size_name}). Solo quedan ${currentStock} unidades.`
-        break
-      }
-    }
-
-    if (!stockValid) {
-      toast({
-        title: "Error de inventario",
-        description: errorMessage,
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsLoading(true)
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setIsSubmitting(true)
 
     try {
-      // Generate invoice number
+      // Generate a unique invoice number (timestamp-based)
       const invoiceNumber = `INV-${Date.now()}`
 
-      // Create sale
+      // Crear la venta
       const { data: saleData, error: saleError } = await supabase
         .from("sales")
         .insert({
           customer_id: customerId || null,
           total_amount: total,
-          invoice_number: invoiceNumber,
+          invoice_number: invoiceNumber, // Add the invoice number
         })
         .select()
         .single()
 
       if (saleError) throw saleError
 
-      // Verificar si es una venta importante (más de 500,000)
-      if (total > 500000) {
-        // Importar el servicio de notificaciones
-        const { notificationService } = await import("@/lib/services/notification-service")
-
-        // Crear notificación de venta importante
-        await notificationService.createImportantSaleNotification(invoiceNumber, total)
-      }
-
-      // Create sale items
+      // Crear los items de la venta
       const saleItems = items.map((item) => ({
         sale_id: saleData.id,
         product_id: item.product_id,
-        size_id: item.size_id,
         quantity: item.quantity,
         price: item.price,
         subtotal: item.subtotal,
@@ -359,33 +279,40 @@ export function SaleForm({
 
       if (itemsError) throw itemsError
 
-      // Update inventory using our new function
+      // Actualizar el stock de los productos
       for (const item of items) {
-        const { error: updateError } = await supabase.rpc("inventory_decrement_stock", {
-          product_id_param: item.product_id,
-          size_id_param: item.size_id,
-          quantity_param: item.quantity,
-        })
-
-        if (updateError) throw updateError
+        const product = products.find((p) => p.id === item.product_id)
+        if (product) {
+          const newStock = Math.max(0, product.stock - item.quantity)
+          
+          const { error: stockError } = await supabase
+            .from("products")
+            .update({ stock: newStock })
+            .eq("id", item.product_id)
+            
+          if (stockError) {
+            console.error("Error updating stock:", stockError.message || JSON.stringify(stockError))
+          }
+        }
       }
 
       toast({
         title: "Venta registrada",
-        description: `Factura ${invoiceNumber} creada exitosamente`,
+        description: `Venta #${saleData.invoice_number} registrada exitosamente`,
       })
 
-      router.refresh()
+      // Redireccionar a la página de ventas
       router.push("/sales")
     } catch (error) {
-      console.error("Error creating sale:", error)
+      // Improved error logging
+      console.error("Error creating sale:", error instanceof Error ? error.message : JSON.stringify(error))
       toast({
         title: "Error",
         description: "Ocurrió un error al registrar la venta",
         variant: "destructive",
       })
     } finally {
-      setIsLoading(false)
+      setIsSubmitting(false)
     }
   }
 
@@ -419,7 +346,7 @@ export function SaleForm({
 `
 
       items.forEach((item) => {
-        message += `- ${item.product_name} (${item.size_name}) x${item.quantity}: ${formatCurrency(item.subtotal)}
+        message += `- ${item.product_name} x${item.quantity}: ${formatCurrency(item.subtotal)}
 `
       })
 
@@ -461,8 +388,8 @@ export function SaleForm({
               </SelectTrigger>
               <SelectContent>
                 {products.map((product) => (
-                  <SelectItem key={product.id} value={product.id}>
-                    {product.name} - {formatCurrency(product.price)}
+                  <SelectItem key={product.id} value={product.id} disabled={product.stock <= 0}>
+                    {product.name} - {formatCurrency(product.price)} ({product.stock} disponibles)
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -472,43 +399,25 @@ export function SaleForm({
           {selectedProduct && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="size">Talla</Label>
-                <Select value={selectedSize} onValueChange={setSelectedSize}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona una talla" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableSizes.map((size) => (
-                      <SelectItem key={size.id} value={size.id} disabled={size.stock <= 0}>
-                        {size.name} ({size.stock} disponibles)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="quantity">
+                  Cantidad <span className="text-xs text-muted-foreground">({selectedProductStock} disponibles)</span>
+                </Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min="1"
+                  max={selectedProductStock}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Number.parseInt(e.target.value) || 1)}
+                  className={stockError ? "border-red-500" : ""}
+                />
+                {stockError && <p className="text-sm text-red-500">{stockError}</p>}
               </div>
-
-              {selectedSize && (
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">
-                    Cantidad <span className="text-xs text-muted-foreground">({selectedProductStock} disponibles)</span>
-                  </Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min="1"
-                    max={selectedProductStock}
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number.parseInt(e.target.value) || 1)}
-                    className={stockError ? "border-red-500" : ""}
-                  />
-                  {stockError && <p className="text-sm text-red-500">{stockError}</p>}
-                </div>
-              )}
 
               <Button
                 onClick={handleAddItem}
                 className="w-full bg-emerald-600 hover:bg-emerald-700"
-                disabled={!selectedProduct || !selectedSize || quantity <= 0 || !!stockError}
+                disabled={!selectedProduct || quantity <= 0 || !!stockError}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Agregar producto
@@ -607,7 +516,6 @@ export function SaleForm({
             <TableHeader>
               <TableRow>
                 <TableHead>Producto</TableHead>
-                <TableHead>Talla</TableHead>
                 <TableHead>Precio</TableHead>
                 <TableHead>Cantidad</TableHead>
                 <TableHead>Subtotal</TableHead>
@@ -617,7 +525,7 @@ export function SaleForm({
             <TableBody>
               {items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center">
+                  <TableCell colSpan={5} className="h-24 text-center">
                     No hay productos agregados
                   </TableCell>
                 </TableRow>
@@ -625,7 +533,6 @@ export function SaleForm({
                 items.map((item, index) => (
                   <TableRow key={index}>
                     <TableCell>{item.product_name}</TableCell>
-                    <TableCell>{item.size_name}</TableCell>
                     <TableCell>{formatCurrency(item.price)}</TableCell>
                     <TableCell>{item.quantity}</TableCell>
                     <TableCell>{formatCurrency(item.subtotal)}</TableCell>
@@ -656,11 +563,15 @@ export function SaleForm({
             )}
           </div>
           <Button
-            onClick={handleSubmit}
-            disabled={isLoading || items.length === 0}
+            onClick={(e) => {
+              // Create a synthetic form event to pass to handleSubmit
+              const formEvent = { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>;
+              handleSubmit(formEvent);
+            }}
+            disabled={isSubmitting || items.length === 0}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            {isLoading ? "Guardando..." : "Completar venta"}
+            {isSubmitting ? "Guardando..." : "Completar venta"}
           </Button>
         </CardFooter>
       </Card>

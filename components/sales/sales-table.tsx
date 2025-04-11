@@ -42,7 +42,6 @@ interface Sale {
   } | null
   items: {
     product_name: string
-    size_name: string
     quantity: number
     price: number
     subtotal: number
@@ -69,7 +68,56 @@ export function SalesTable({
   const [activeFilter, setActiveFilter] = useState<"all" | "today" | "week" | "month">(
     initialFilter === "today" ? "today" : (initialFilter as "all" | "today" | "week" | "month"),
   )
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null)
+  
   const supabase = createClient()
+
+  const handleDeleteSale = async () => {
+    if (!saleToDelete) return
+    
+    try {
+      // Delete sale items first
+      const { error: itemsError } = await supabase
+        .from("sale_items")
+        .delete()
+        .eq("sale_id", saleToDelete.id)
+        
+      if (itemsError) throw itemsError
+      
+      // Then delete the sale
+      const { error: saleError } = await supabase
+        .from("sales")
+        .delete()
+        .eq("id", saleToDelete.id)
+        
+      if (saleError) throw saleError
+      
+      // Update local state
+      setSales((prev) => prev.filter((sale) => sale.id !== saleToDelete.id))
+      
+      toast({
+        title: "Venta eliminada",
+        description: "La venta ha sido eliminada correctamente",
+      })
+      
+      addNotification(
+        "Venta eliminada",
+        `La factura ${saleToDelete.invoice_number} ha sido eliminada`,
+        "success"
+      )
+    } catch (error) {
+      console.error("Error deleting sale:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo eliminar la venta",
+        variant: "destructive",
+      })
+    } finally {
+      setShowDeleteDialog(false)
+      setSaleToDelete(null)
+    }
+  }
 
   // Cargar ventas directamente desde Supabase al inicio
   useEffect(() => {
@@ -110,7 +158,10 @@ export function SalesTable({
                 quantity, 
                 price, 
                 subtotal,
-                products (name),
+                products (
+                  id,
+                  name
+                ),
                 sizes (name)
               `)
               .eq("sale_id", sale.id)
@@ -119,14 +170,16 @@ export function SalesTable({
               console.error("Error fetching sale items:", itemsError)
               return {
                 ...sale,
-                customer: sale.customers,
+                customer: sale.customers || null,
                 items: [],
               }
             }
 
+            // Fix the mapping of product data
             const items = itemsData.map((item) => ({
-              product_name: item.products.name,
-              size_name: item.sizes.name,
+              product_name: item.products && typeof item.products === 'object' && 'name' in item.products 
+                ? item.products.name 
+                : "Unknown product",
               quantity: item.quantity,
               price: item.price,
               subtotal: item.subtotal,
@@ -134,7 +187,7 @@ export function SalesTable({
 
             return {
               ...sale,
-              customer: sale.customers,
+              customer: sale.customers || null,
               items,
             }
           }),
@@ -241,16 +294,21 @@ export function SalesTable({
           quantity, 
           price, 
           subtotal,
-          products (name),
+          products (
+            id,
+            name
+          ),
           sizes (name)
         `)
         .eq("sale_id", saleId)
 
       if (itemsError) throw itemsError
 
+      // Fix the mapping of product data
       const items = itemsData.map((item) => ({
-        product_name: item.products.name,
-        size_name: item.sizes.name,
+        product_name: item.products && typeof item.products === 'object' && 'name' in item.products 
+          ? item.products.name 
+          : "Unknown product",
         quantity: item.quantity,
         price: item.price,
         subtotal: item.subtotal,
@@ -258,7 +316,7 @@ export function SalesTable({
 
       return {
         ...saleData,
-        customer: saleData.customers,
+        customer: saleData.customers || null,
         items,
       }
     } catch (error) {
@@ -280,7 +338,17 @@ export function SalesTable({
     setIsSendingWhatsApp(true)
 
     try {
-      const whatsappUrl = sendInvoiceToWhatsApp(sale as SaleData)
+      // Create a properly formatted sale object for WhatsApp
+      const formattedSale: SaleData = {
+        ...sale,
+        items: sale.items.map(item => ({
+          ...item,
+          // Ensure product_name is properly formatted without undefined
+          product_name: item.product_name || "Producto sin nombre"
+        }))
+      } as SaleData;
+      
+      const whatsappUrl = sendInvoiceToWhatsApp(formattedSale)
       window.open(whatsappUrl, "_blank")
 
       addNotification("WhatsApp preparado", "Se ha generado el mensaje con la factura", "success")
@@ -357,19 +425,50 @@ export function SalesTable({
     addNotification("Exportación completada", "Se ha generado el reporte de todas las ventas", "success")
   }
 
+  // Update the columns definition to correctly show product information in the Prenda column
   const columns = [
     {
       header: "Factura",
-      accessorKey: "invoice_number",
+      accessorKey: "invoice_number" as keyof Sale,
     },
     {
       header: "Fecha",
-      accessorKey: "created_at",
-      cell: (row: Sale) => formatDateTime(row.created_at),
+      accessorKey: "created_at" as keyof Sale,
+      cell: (row: Sale) => {
+        const date = new Date(row.created_at)
+        return (
+          <div className="whitespace-nowrap">
+            <div>{date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
+            <div className="text-xs text-gray-500">{date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</div>
+          </div>
+        )
+      },
+    },
+    {
+      header: "Prenda",
+      accessorKey: "items" as keyof Sale,
+      cell: (row: Sale) => {
+        if (!row.items || row.items.length === 0) {
+          return <span className="text-gray-500">Sin productos</span>
+        }
+        
+        // Show the first product and indicate if there are more
+        const mainProduct = row.items[0].product_name
+        const additionalCount = row.items.length - 1
+        
+        return (
+          <div>
+            <div className="font-medium">{mainProduct}</div>
+            {additionalCount > 0 && (
+              <div className="text-xs text-gray-500">+{additionalCount} {additionalCount === 1 ? 'producto' : 'productos'}</div>
+            )}
+          </div>
+        )
+      },
     },
     {
       header: "Cliente",
-      accessorKey: (row: Sale) => row.customer?.name || "Cliente no registrado",
+      accessorKey: "customer" as keyof Sale,
       cell: (row: Sale) => (
         <div>
           {row.customer ? (
@@ -385,7 +484,7 @@ export function SalesTable({
     },
     {
       header: "Total",
-      accessorKey: "total_amount",
+      accessorKey: "total_amount" as keyof Sale,
       cell: (row: Sale) => formatCurrency(row.total_amount),
     },
   ]
@@ -443,13 +542,26 @@ export function SalesTable({
         columns={columns}
         searchKey="invoice_number"
         onRowClick={(row) => router.push(`/sales/${row.id}`)}
+        // Replace the actions section in the DataTable component
         actions={(row) => (
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="icon" asChild>
-              <Link href={`/sales/${row.id}`}>
-                <Eye className="h-4 w-4" />
-                <span className="sr-only">Ver detalles</span>
-              </Link>
+            <Button 
+              variant="ghost"
+              size="icon"
+              onClick={(e) => {
+                e.stopPropagation()
+                setSaleToDelete(row)
+                setShowDeleteDialog(true)
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18"></path>
+                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"></path>
+                <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+              <span className="sr-only">Eliminar venta</span>
             </Button>
             <Button
               variant="ghost"
@@ -484,31 +596,60 @@ export function SalesTable({
 
       {/* Diálogo para ver/descargar PDF */}
       <Dialog open={showPdfDialog} onOpenChange={setShowPdfDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-[550px] w-[95vw]">
           <DialogHeader>
             <DialogTitle>Factura {selectedSale?.invoice_number}</DialogTitle>
             <DialogDescription>
               Puedes descargar la factura en formato PDF o enviarla por WhatsApp al cliente.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <p className="mb-2 font-medium">Detalles de la factura:</p>
-            <ul className="space-y-1 text-sm">
-              <li>
-                <span className="font-medium">Fecha:</span> {selectedSale && formatDateTime(selectedSale.created_at)}
-              </li>
-              <li>
-                <span className="font-medium">Cliente:</span> {selectedSale?.customer?.name || "Cliente no registrado"}
-              </li>
-              <li>
-                <span className="font-medium">Total:</span> {selectedSale && formatCurrency(selectedSale.total_amount)}
-              </li>
-              <li>
-                <span className="font-medium">Productos:</span> {selectedSale?.items.length || 0}
-              </li>
-            </ul>
+          
+          <div className="space-y-3 py-2">
+            <div className="text-green-600 font-medium border-b pb-2">Detalles de la factura:</div>
+            
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <span className="text-muted-foreground">Fecha:</span>
+                <div className="font-medium">{selectedSale && formatDateTime(selectedSale.created_at)}</div>
+              </div>
+              
+              <div>
+                <span className="text-muted-foreground">Cliente:</span>
+                <div className="font-medium">{selectedSale?.customer?.name || "Cliente no registrado"}</div>
+              </div>
+              
+              <div>
+                <span className="text-muted-foreground">Identificación:</span>
+                <div className="font-medium">{selectedSale?.customer?.identification || "N/A"}</div>
+              </div>
+              
+              <div>
+                <span className="text-muted-foreground">Total:</span>
+                <div className="font-medium text-green-600">{selectedSale && formatCurrency(selectedSale.total_amount)}</div>
+              </div>
+            </div>
+            
+            <div className="pt-1">
+              <div className="text-green-600 font-medium mb-2">Productos:</div>
+              {selectedSale?.items && selectedSale.items.length > 0 ? (
+                <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                  {selectedSale.items.map((item, index) => (
+                    <div key={index} className="flex justify-between text-sm border-b pb-1">
+                      <div>
+                        <div className="font-medium">{item.product_name}</div>
+                        <div className="text-xs text-muted-foreground">{item.quantity} x {formatCurrency(item.price)}</div>
+                      </div>
+                      <div className="font-medium">{formatCurrency(item.subtotal)}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">Sin productos</div>
+              )}
+            </div>
           </div>
-          <DialogFooter className="flex sm:justify-between">
+          
+          <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-between pt-2">
             <Button variant="outline" onClick={() => setShowPdfDialog(false)}>
               Cancelar
             </Button>
@@ -525,7 +666,7 @@ export function SalesTable({
                   Enviar por WhatsApp
                 </Button>
               )}
-              <Button onClick={handleDownloadPdf}>
+              <Button onClick={handleDownloadPdf} className="bg-green-600 hover:bg-green-700">
                 <FileText className="mr-2 h-4 w-4" />
                 Descargar PDF
               </Button>
@@ -569,6 +710,30 @@ export function SalesTable({
             <Button onClick={handleGenerateDailyReport} disabled={!selectedDate}>
               <FileText className="mr-2 h-4 w-4" />
               Generar reporte
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de confirmación para eliminar venta */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>¿Estás seguro?</DialogTitle>
+            <DialogDescription>
+              Esta acción no se puede deshacer. Esto eliminará permanentemente
+              la venta y todos sus datos asociados.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-row justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteSale}
+            >
+              Eliminar
             </Button>
           </DialogFooter>
         </DialogContent>
