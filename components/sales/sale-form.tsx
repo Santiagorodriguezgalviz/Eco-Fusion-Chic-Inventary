@@ -29,6 +29,7 @@ interface Customer {
   phone: string | null
 }
 
+// Modificar la interfaz SaleItem para incluir información de descuento
 interface SaleItem {
   product_id: string
   product_name: string
@@ -36,6 +37,8 @@ interface SaleItem {
   quantity: number
   subtotal: number
   available_stock: number // Stock disponible para validaciones
+  discount_percentage: number // Nuevo campo para el porcentaje de descuento
+  final_price: number // Precio después del descuento
 }
 
 export function SaleForm({
@@ -63,10 +66,13 @@ export function SaleForm({
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false)
   const [stockError, setStockError] = useState<string | null>(null)
   const [selectedProductStock, setSelectedProductStock] = useState<number>(0)
-  const [isSubmitting, setIsSubmitting] = useState(false) // Añadir este estado
-
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [discountPercentage, setDiscountPercentage] = useState<number>(0)
+  const [customFinalPrice, setCustomFinalPrice] = useState<string>("") // Nuevo campo para precio final personalizado
+  const [useFinalPrice, setUseFinalPrice] = useState<boolean>(false) // Toggle para usar precio final o descuento
+  
   const supabase = createClient()
-
+  
   // Suscripción en tiempo real a cambios en clientes
   useRealtimeSubscription({
     table: "customers",
@@ -128,6 +134,7 @@ export function SaleForm({
     }
   }, [quantity, selectedProductStock, selectedProduct])
 
+  // Modificar handleAddItem para manejar precio final personalizado
   const handleAddItem = () => {
     if (!selectedProduct || quantity <= 0) return
 
@@ -140,18 +147,36 @@ export function SaleForm({
     const product = products.find((p) => p.id === selectedProduct)
     if (!product) return
 
+    // Determinar precio final y descuento
+    let finalPrice: number
+    let discountPercent: number = discountPercentage
+    
+    if (useFinalPrice && customFinalPrice) {
+      // Usar precio final personalizado
+      finalPrice = parseFloat(customFinalPrice)
+      // Calcular el porcentaje de descuento para almacenarlo
+      const discountAmount = product.price - finalPrice
+      discountPercent = Math.round((discountAmount / product.price) * 100)
+    } else {
+      // Usar descuento porcentual
+      finalPrice = product.price * (1 - discountPercentage / 100)
+    }
+
     const newItem: SaleItem = {
       product_id: product.id,
       product_name: product.name,
-      price: product.price,
+      price: product.price, // Precio original
       quantity,
-      subtotal: product.price * quantity,
+      subtotal: finalPrice * quantity, // Subtotal con precio final
       available_stock: product.stock,
+      discount_percentage: discountPercent,
+      final_price: finalPrice
     }
 
-    // Verificar si ya existe un item con el mismo producto
+    // Verificar si ya existe un item con el mismo producto y mismo precio final
     const existingItemIndex = items.findIndex(
-      (item) => item.product_id === newItem.product_id
+      (item) => item.product_id === newItem.product_id && 
+                Math.abs(item.final_price - newItem.final_price) < 0.01 // Comparación con tolerancia para decimales
     )
 
     if (existingItemIndex >= 0) {
@@ -172,7 +197,7 @@ export function SaleForm({
       updatedItems[existingItemIndex] = {
         ...existingItem,
         quantity: newQuantity,
-        subtotal: existingItem.price * newQuantity,
+        subtotal: existingItem.final_price * newQuantity,
       }
 
       setItems(updatedItems)
@@ -184,13 +209,16 @@ export function SaleForm({
     // Limpiar selecciones
     setSelectedProduct("")
     setQuantity(1)
+    setDiscountPercentage(0)
+    setCustomFinalPrice("")
+    setUseFinalPrice(false)
     setStockError(null)
 
-    // In handleAddItem
+    // Mensaje de toast con información de descuento
     toast({
       title: "Producto agregado",
-      description: `${quantity} ${product.name} agregado al carrito`,
-      variant: "default", // Replace icon with variant
+      description: `${quantity} ${product.name} ${discountPercentage > 0 ? `con ${discountPercentage}% de descuento` : ''} agregado al carrito`,
+      variant: "default",
     })
   }
 
@@ -266,12 +294,14 @@ export function SaleForm({
 
       if (saleError) throw saleError
 
-      // Crear los items de la venta
+      // Crear los items de la venta con información de descuento
       const saleItems = items.map((item) => ({
         sale_id: saleData.id,
         product_id: item.product_id,
         quantity: item.quantity,
-        price: item.price,
+        price: item.price, // Precio original
+        discount_percentage: item.discount_percentage,
+        final_price: item.final_price, // Precio después del descuento
         subtotal: item.subtotal,
       }))
 
@@ -414,10 +444,79 @@ export function SaleForm({
                 {stockError && <p className="text-sm text-red-500">{stockError}</p>}
               </div>
 
+              {/* Selector de tipo de descuento */}
+              <div className="flex items-center space-x-2">
+                <Button 
+                  type="button" 
+                  variant={useFinalPrice ? "outline" : "default"} 
+                  onClick={() => setUseFinalPrice(false)}
+                  className="flex-1"
+                >
+                  Descuento (%)
+                </Button>
+                <Button 
+                  type="button" 
+                  variant={useFinalPrice ? "default" : "outline"} 
+                  onClick={() => setUseFinalPrice(true)}
+                  className="flex-1"
+                >
+                  Precio final
+                </Button>
+              </div>
+
+              {/* Campo condicional según la opción seleccionada */}
+              {useFinalPrice ? (
+                <div className="space-y-2">
+                  <Label htmlFor="finalPrice">
+                    Precio final
+                  </Label>
+                  <Input
+                    id="finalPrice"
+                    type="number"
+                    min="0"
+                    max={products.find(p => p.id === selectedProduct)?.price}
+                    value={customFinalPrice}
+                    onChange={(e) => setCustomFinalPrice(e.target.value)}
+                  />
+                  {customFinalPrice && (
+                    <div className="text-sm text-green-600">
+                      Precio original: {formatCurrency(products.find(p => p.id === selectedProduct)?.price || 0)}
+                      <br />
+                      Ahorro: {formatCurrency((products.find(p => p.id === selectedProduct)?.price || 0) - parseFloat(customFinalPrice || "0"))}
+                      <br />
+                      Descuento aproximado: {Math.round(((products.find(p => p.id === selectedProduct)?.price || 0) - parseFloat(customFinalPrice || "0")) / (products.find(p => p.id === selectedProduct)?.price || 1) * 100)}%
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="discount">
+                    Descuento (%)
+                  </Label>
+                  <Input
+                    id="discount"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={discountPercentage}
+                    onChange={(e) => setDiscountPercentage(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                  />
+                  {discountPercentage > 0 && (
+                    <div className="text-sm text-green-600">
+                      Precio original: {formatCurrency(products.find(p => p.id === selectedProduct)?.price || 0)}
+                      <br />
+                      Precio con descuento: {formatCurrency((products.find(p => p.id === selectedProduct)?.price || 0) * (1 - discountPercentage/100))}
+                      <br />
+                      Ahorro: {formatCurrency((products.find(p => p.id === selectedProduct)?.price || 0) * (discountPercentage/100))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <Button
                 onClick={handleAddItem}
                 className="w-full bg-emerald-600 hover:bg-emerald-700"
-                disabled={!selectedProduct || quantity <= 0 || !!stockError}
+                disabled={!selectedProduct || quantity <= 0 || !!stockError || (useFinalPrice && !customFinalPrice)}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Agregar producto
@@ -516,7 +615,9 @@ export function SaleForm({
             <TableHeader>
               <TableRow>
                 <TableHead>Producto</TableHead>
-                <TableHead>Precio</TableHead>
+                <TableHead>Precio Original</TableHead>
+                <TableHead>Descuento</TableHead>
+                <TableHead>Precio Final</TableHead>
                 <TableHead>Cantidad</TableHead>
                 <TableHead>Subtotal</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
@@ -525,7 +626,7 @@ export function SaleForm({
             <TableBody>
               {items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center">
+                  <TableCell colSpan={7} className="h-24 text-center">
                     No hay productos agregados
                   </TableCell>
                 </TableRow>
@@ -534,6 +635,8 @@ export function SaleForm({
                   <TableRow key={index}>
                     <TableCell>{item.product_name}</TableCell>
                     <TableCell>{formatCurrency(item.price)}</TableCell>
+                    <TableCell>{item.discount_percentage > 0 ? `${item.discount_percentage}%` : '-'}</TableCell>
+                    <TableCell>{formatCurrency(item.final_price)}</TableCell>
                     <TableCell>{item.quantity}</TableCell>
                     <TableCell>{formatCurrency(item.subtotal)}</TableCell>
                     <TableCell>

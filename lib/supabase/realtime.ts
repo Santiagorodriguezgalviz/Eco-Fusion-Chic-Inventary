@@ -42,32 +42,57 @@ export function useRealtimeSubscription(options: SubscriptionOptions) {
     let retryCount = 0
     const maxRetries = 3
     
-    // Función para manejar errores de manera consistente
-    const handleError = (errorType: string, errorDetails: any) => {
-      const errorMessage = errorDetails?.message || "Error desconocido"
-      const errorInfo = {
-        type: errorType,
-        message: errorMessage,
-        details: errorDetails,
-        table: optionsRef.current.table,
-        timestamp: new Date().toISOString()
+    // Enhanced error handler with better logging
+    const safeNotifyError = (type: string, details: any) => {
+      try {
+        // Extract message safely
+        let message = "Error desconocido";
+        if (details && typeof details === 'object' && 'message' in details) {
+          message = String(details.message);
+        }
+        
+        // Create a detailed error object for debugging
+        const errorDetails = {
+          type,
+          message,
+          table: optionsRef.current.table,
+          timestamp: new Date().toISOString(),
+          details: typeof details === 'object' ? { ...details } : details,
+          channelId
+        };
+        
+        // Log error details to a custom div for debugging
+        const debugInfo = document.createElement('div');
+        debugInfo.style.display = 'none';
+        debugInfo.setAttribute('data-debug-realtime', 'true');
+        debugInfo.textContent = JSON.stringify(errorDetails, null, 2);
+        document.body.appendChild(debugInfo);
+        
+        // Call user's error handler if provided
+        if (typeof optionsRef.current.onError === 'function') {
+          optionsRef.current.onError(errorDetails);
+        }
+        
+        // Show toast if enabled
+        if (optionsRef.current.enableToasts !== false) {
+          toast({
+            title: "Error de conexión en tiempo real",
+            description: `Problema con ${optionsRef.current.table}: ${message}. Ver consola para más detalles.`,
+            variant: "destructive",
+          });
+        }
+      } catch (_) {
+        // If even our safe error handling fails, create a minimal error element
+        try {
+          const fallbackDebug = document.createElement('div');
+          fallbackDebug.setAttribute('data-debug-realtime-fallback', type);
+          fallbackDebug.style.display = 'none';
+          document.body.appendChild(fallbackDebug);
+        } catch {
+          // Ultimate fallback - do nothing
+        }
       }
-      
-      console.error(`[Realtime ${errorType}]:`, errorInfo)
-      
-      if (optionsRef.current.onError) {
-        optionsRef.current.onError(errorInfo)
-      }
-      
-      // Solo mostrar toast si está habilitado (por defecto true)
-      if (optionsRef.current.enableToasts !== false) {
-        toast({
-          title: "Error de conexión en tiempo real",
-          description: `No se pudo establecer la conexión para ${optionsRef.current.table}. ${errorMessage}`,
-          variant: "destructive",
-        })
-      }
-    }
+    };
 
     const setupChannel = () => {
       try {
@@ -75,8 +100,8 @@ export function useRealtimeSubscription(options: SubscriptionOptions) {
         if (channelRef.current) {
           try {
             channelRef.current.unsubscribe()
-          } catch (e) {
-            // Ignorar errores al desuscribirse
+          } catch (_) {
+            // Silent catch
           }
         }
         
@@ -114,7 +139,7 @@ export function useRealtimeSubscription(options: SubscriptionOptions) {
               try {
                 optionsRef.current.onEvent(payload)
               } catch (error) {
-                handleError("EventHandler", error)
+                safeNotifyError("EventHandler", error)
               }
             }
           )
@@ -124,32 +149,27 @@ export function useRealtimeSubscription(options: SubscriptionOptions) {
         channel.subscribe((status, err) => {
           if (status === "SUBSCRIBED") {
             setConnectionStatus("connected")
-            console.log(`[Realtime] Conectado a ${optionsRef.current.table}`)
-            retryCount = 0 // Resetear contador de reintentos al conectar exitosamente
+            retryCount = 0 // Resetear contador de reintentos
           } else if (status === "CHANNEL_ERROR") {
             setConnectionStatus("error")
-            handleError("ChannelError", err || { message: "Error de canal no especificado" })
+            safeNotifyError("ChannelError", err || { message: "Error de canal" })
             
             // Intentar reconectar si no excedimos el máximo de reintentos
             if (retryCount < maxRetries) {
               retryCount++
-              console.log(`[Realtime] Reintentando conexión (${retryCount}/${maxRetries})...`)
-              
-              // Esperar un tiempo antes de reintentar (backoff exponencial)
               const delay = Math.min(1000 * Math.pow(2, retryCount), 10000)
               setTimeout(setupChannel, delay)
             }
           } else if (status === "TIMED_OUT") {
             setConnectionStatus("timeout")
-            handleError("Timeout", { message: "La conexión ha excedido el tiempo de espera" })
+            safeNotifyError("Timeout", { message: "Tiempo de espera excedido" })
           } else if (status === "CLOSED") {
             setConnectionStatus("closed")
-            console.log(`[Realtime] Conexión cerrada para ${optionsRef.current.table}`)
           }
         })
       } catch (error) {
         setConnectionStatus("error")
-        handleError("SetupError", error)
+        safeNotifyError("SetupError", error)
       }
     }
 
@@ -163,13 +183,12 @@ export function useRealtimeSubscription(options: SubscriptionOptions) {
           channelRef.current.unsubscribe()
           channelRef.current = null
           setConnectionStatus("disconnected")
-        } catch (error) {
-          console.error("[Realtime] Error al desuscribirse del canal:", error)
+        } catch (_) {
+          // Silent catch
         }
       }
     }
-  }, [supabase, toast]) // Solo se ejecuta una vez al montar el componente
+  }, [supabase, toast])
 
-  // Devolver el estado de la conexión para que los componentes puedan reaccionar
   return { connectionStatus }
 }

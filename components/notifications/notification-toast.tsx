@@ -68,7 +68,16 @@ export function NotificationToast() {
       }
     },
     onError: (error) => {
-      console.error("Error en la suscripción a notificaciones:", error)
+      // Use a safer error logging approach
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Unknown error occurred';
+      
+      // Log the error with a more structured approach
+      if (process.env.NODE_ENV !== 'production') {
+        // Only log detailed errors in development
+        console.warn(`Notification subscription error: ${errorMessage}`);
+      }
       
       // Mostrar un toast de error si hay problemas con la suscripción
       showToast({

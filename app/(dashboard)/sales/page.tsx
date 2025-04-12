@@ -4,6 +4,16 @@ import { getDateRange } from "@/lib/utils/date"
 
 export const dynamic = "force-dynamic"
 
+// Define proper types for the joined data
+interface SaleItemWithProduct {
+  quantity: number;
+  price: number;
+  subtotal: number;
+  products: {
+    name: string;
+  };
+}
+
 async function getSales(searchParams: { filter?: string }) {
   const supabase = createClient()
   const filter = searchParams.filter || "all"
@@ -52,13 +62,17 @@ async function getSales(searchParams: { filter?: string }) {
           console.error("Error fetching sale items:", itemsError)
           return {
             ...sale,
-            customer: sale.customers,
+            // Fix: customers is an array, but we need the first item
+            customer: sale.customers?.[0] || null,
             items: [],
           }
         }
 
-        const items = itemsData.map((item) => ({
-          product_name: item.products.name,
+        // Cast itemsData to the correct type
+        const typedItemsData = itemsData as unknown as SaleItemWithProduct[];
+        
+        const items = typedItemsData.map((item) => ({
+          product_name: item.products.name || "Producto sin nombre",
           quantity: item.quantity,
           price: item.price,
           subtotal: item.subtotal,
@@ -66,7 +80,8 @@ async function getSales(searchParams: { filter?: string }) {
 
         return {
           ...sale,
-          customer: sale.customers,
+          // Fix: customers is an array, but we need the first item
+          customer: sale.customers?.[0] || null,
           items,
         }
       }),
