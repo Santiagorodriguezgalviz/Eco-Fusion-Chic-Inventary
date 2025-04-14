@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
@@ -21,7 +21,40 @@ export function LoginForm() {
     email: "",
     password: "",
   })
+  const [loginAttempts, setLoginAttempts] = useState(0)
+  const [cooldownActive, setCooldownActive] = useState(false)
+  const [cooldownTime, setCooldownTime] = useState(0)
   const supabase = createClient()
+
+  // Check for existing session on component mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data } = await supabase.auth.getSession()
+      if (data.session) {
+        router.push("/")
+      }
+    }
+    
+    checkSession()
+  }, [router, supabase])
+
+  // Handle cooldown timer
+  useEffect(() => {
+    let timer: NodeJS.Timeout
+    
+    if (cooldownActive && cooldownTime > 0) {
+      timer = setTimeout(() => {
+        setCooldownTime(prev => prev - 1)
+      }, 1000)
+    } else if (cooldownTime === 0 && cooldownActive) {
+      setCooldownActive(false)
+      setLoginAttempts(0)
+    }
+    
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
+  }, [cooldownActive, cooldownTime])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -30,28 +63,64 @@ export function LoginForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+  
+    if (isLoading) {
+      console.log("handleSubmit bloqueado porque isLoading está activo")
+      return
+    }
+  
+    console.log("handleSubmit ejecutado")
+  
+    // Check if cooldown is active
+    if (cooldownActive) {
+      toast({
+        title: "Demasiados intentos",
+        description: `Por favor espera ${cooldownTime} segundos antes de intentar nuevamente`,
+        variant: "destructive",
+      })
+      return
+    }
+  
     setIsLoading(true)
-
+  
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      // Clear any existing sessions first to avoid token conflicts
+      await supabase.auth.signOut()
+  
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
       })
-
+  
       if (error) {
+        // Handle rate limit error specifically
+        if (error.message.includes("rate limit") || error.status === 429) {
+          setCooldownActive(true)
+          setCooldownTime(30) // 30 seconds cooldown
+          throw new Error("Has excedido el límite de intentos. Por favor espera 30 segundos antes de intentar nuevamente.")
+        }
+  
+        // Track failed login attempts
+        setLoginAttempts(prev => {
+          const newAttempts = prev + 1
+          if (newAttempts >= 5) {
+            setCooldownActive(true)
+            setCooldownTime(60) // 1 minute cooldown after 5 attempts
+          }
+          return newAttempts
+        })
+  
         throw error
       }
-
+  
+      // Reset login attempts on successful login
+      setLoginAttempts(0)
+  
       toast({
         title: "Inicio de sesión exitoso",
         description: "Bienvenido a Eco Fusion Chic",
-        icon: (
-          <div className="h-6 w-6 rounded-full bg-emerald-100 flex items-center justify-center">
-            <LogIn className="h-4 w-4 text-emerald-600" />
-          </div>
-        ),
       })
-
+  
       router.refresh()
       router.push("/")
     } catch (error: any) {
@@ -64,6 +133,7 @@ export function LoginForm() {
       setIsLoading(false)
     }
   }
+  
 
   const toggleShowPassword = () => {
     setShowPassword(!showPassword)
@@ -98,6 +168,13 @@ export function LoginForm() {
             <p className="mt-2 text-gray-600">Inicia sesión para acceder a tu cuenta</p>
           </div>
 
+          {cooldownActive && (
+            <div className="mb-4 rounded-md bg-amber-50 p-3 text-center text-amber-800 border border-amber-200">
+              <p className="font-medium">Demasiados intentos de inicio de sesión</p>
+              <p className="text-sm">Por favor espera {cooldownTime} segundos antes de intentar nuevamente</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email" className="text-sm font-medium">
@@ -112,6 +189,7 @@ export function LoginForm() {
                 onChange={handleChange}
                 required
                 className="h-12 border-gray-300 bg-white/80 backdrop-blur-sm focus-visible:ring-emerald-500"
+                disabled={cooldownActive}
               />
             </div>
             <div className="space-y-2">
@@ -133,6 +211,7 @@ export function LoginForm() {
                   onChange={handleChange}
                   required
                   className="h-12 border-gray-300 bg-white/80 pr-10 backdrop-blur-sm focus-visible:ring-emerald-500"
+                  disabled={cooldownActive}
                 />
                 <Button
                   type="button"
@@ -140,6 +219,7 @@ export function LoginForm() {
                   size="icon"
                   className="absolute right-0 top-0 h-12 w-12 text-gray-500"
                   onClick={toggleShowPassword}
+                  disabled={cooldownActive}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   <span className="sr-only">{showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}</span>
@@ -149,7 +229,7 @@ export function LoginForm() {
             <Button
               type="submit"
               className="h-12 w-full bg-emerald-600 text-white hover:bg-emerald-700"
-              disabled={isLoading}
+              disabled={isLoading || cooldownActive}
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">

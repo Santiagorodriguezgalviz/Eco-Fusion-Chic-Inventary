@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { formatCurrency, getDateRange } from "@/lib/utils/date"
 import { StatsCard } from "@/components/dashboard/stats-card"
 import { SalesChart } from "@/components/dashboard/sales-chart"
-import { ArrowUpRight, Download } from "lucide-react"
+import { ArrowUpRight, Download, DollarSign } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { DashboardInventoryCard } from "@/components/dashboard/dashboard-inventory-card"
@@ -32,6 +32,15 @@ async function getStats() {
 
     if (todayError) throw todayError
 
+    // Get total expenses for today
+    const { data: todayExpenses, error: todayExpensesError } = await supabase
+      .from("expenses")
+      .select("amount")
+      .gte("created_at", today.start)
+      .lte("created_at", today.end)
+
+    if (todayExpensesError) throw todayExpensesError
+
     // Get total sales for this week
     const { data: weekSales, error: weekError } = await supabase
       .from("sales")
@@ -40,6 +49,15 @@ async function getStats() {
       .lte("created_at", week.end)
 
     if (weekError) throw weekError
+
+    // Get total expenses for this week
+    const { data: weekExpenses, error: weekExpensesError } = await supabase
+      .from("expenses")
+      .select("amount")
+      .gte("created_at", week.start)
+      .lte("created_at", week.end)
+
+    if (weekExpensesError) throw weekExpensesError
 
     // Get total sales for this month
     const { data: monthSales, error: monthError } = await supabase
@@ -50,6 +68,15 @@ async function getStats() {
 
     if (monthError) throw monthError
 
+    // Get total expenses for this month
+    const { data: monthExpenses, error: monthExpensesError } = await supabase
+      .from("expenses")
+      .select("amount")
+      .gte("created_at", month.start)
+      .lte("created_at", month.end)
+
+    if (monthExpensesError) throw monthExpensesError
+
     // Get total sales for last month
     const { data: lastMonthSales, error: lastMonthError } = await supabase
       .from("sales")
@@ -58,6 +85,15 @@ async function getStats() {
       .lte("created_at", lastMonth.end)
 
     if (lastMonthError) throw lastMonthError
+
+    // Get total expenses for last month
+    const { data: lastMonthExpenses, error: lastMonthExpensesError } = await supabase
+      .from("expenses")
+      .select("amount")
+      .gte("created_at", lastMonth.start)
+      .lte("created_at", lastMonth.end)
+
+    if (lastMonthExpensesError) throw lastMonthExpensesError
 
     // Get total products in inventory
     const { count: productsCount, error: productsError } = await supabase
@@ -99,21 +135,40 @@ async function getStats() {
 
     // Calculate totals
     const todayTotal = todaySales?.reduce((sum, sale) => sum + sale.total_amount, 0) || 0
+    const todayExpensesTotal = todayExpenses?.reduce((sum, expense) => sum + expense.amount, 0) || 0
+    const todayNetIncome = todayTotal - todayExpensesTotal
+
     const weekTotal = weekSales?.reduce((sum, sale) => sum + sale.total_amount, 0) || 0
+    const weekExpensesTotal = weekExpenses?.reduce((sum, expense) => sum + expense.amount, 0) || 0
+    const weekNetIncome = weekTotal - weekExpensesTotal
+
     const monthTotal = monthSales?.reduce((sum, sale) => sum + sale.total_amount, 0) || 0
+    const monthExpensesTotal = monthExpenses?.reduce((sum, expense) => sum + expense.amount, 0) || 0
+    const monthNetIncome = monthTotal - monthExpensesTotal
+
     const lastMonthTotal = lastMonthSales?.reduce((sum, sale) => sum + sale.total_amount, 0) || 0
+    const lastMonthExpensesTotal = lastMonthExpenses?.reduce((sum, expense) => sum + expense.amount, 0) || 0
+    const lastMonthNetIncome = lastMonthTotal - lastMonthExpensesTotal
 
     // Calculate month-over-month growth
     const monthGrowth = lastMonthTotal > 0 ? Math.round(((monthTotal - lastMonthTotal) / lastMonthTotal) * 100) : 0
+    const netIncomeGrowth = lastMonthNetIncome > 0 ? Math.round(((monthNetIncome - lastMonthNetIncome) / lastMonthNetIncome) * 100) : 0
 
     return {
       todayTotal,
+      todayExpensesTotal,
+      todayNetIncome,
       weekTotal,
+      weekExpensesTotal,
+      weekNetIncome,
       monthTotal,
+      monthExpensesTotal,
+      monthNetIncome,
       productsCount: productsCount || 0,
       lowStockCount: lowStockCount || 0,
       pendingOrdersCount: pendingOrdersCount || 0,
       monthGrowth,
+      netIncomeGrowth,
       customersCount: customersCount || 0,
       newCustomersCount: newCustomersCount || 0,
     }
@@ -121,12 +176,19 @@ async function getStats() {
     console.error("Error fetching dashboard stats:", error)
     return {
       todayTotal: 0,
+      todayExpensesTotal: 0,
+      todayNetIncome: 0,
       weekTotal: 0,
+      weekExpensesTotal: 0,
+      weekNetIncome: 0,
       monthTotal: 0,
+      monthExpensesTotal: 0,
+      monthNetIncome: 0,
       productsCount: 0,
       lowStockCount: 0,
       pendingOrdersCount: 0,
       monthGrowth: 0,
+      netIncomeGrowth: 0,
       customersCount: 0,
       newCustomersCount: 0,
     }
@@ -169,12 +231,19 @@ export default async function DashboardPage() {
           href="/sales?filter=today"
         />
         <StatsCard
-          title="Ventas de la semana"
-          value={formatCurrency(stats.weekTotal)}
-          iconName="ShoppingCart"
-          iconColor="text-blue-500"
-          iconBgColor="bg-blue-100"
-          href="/sales?filter=week"
+          title="Gastos de hoy"
+          value={formatCurrency(stats.todayExpensesTotal)}
+          iconName="DollarSign"
+          iconColor="text-red-500"
+          iconBgColor="bg-red-100"
+          href="/expenses?filter=today"
+        />
+        <StatsCard
+          title="Ingresos netos (hoy)"
+          value={formatCurrency(stats.todayNetIncome)}
+          iconName="TrendingUp"
+          iconColor="text-emerald-500"
+          iconBgColor="bg-emerald-100"
         />
         <StatsCard
           title="Ventas del mes"
@@ -187,6 +256,28 @@ export default async function DashboardPage() {
             isPositive: stats.monthGrowth >= 0,
           }}
           href="/sales?filter=month"
+        />
+      </div>
+
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        <StatsCard
+          title="Gastos del mes"
+          value={formatCurrency(stats.monthExpensesTotal)}
+          iconName="DollarSign"
+          iconColor="text-red-500"
+          iconBgColor="bg-red-100"
+          href="/expenses?filter=month"
+        />
+        <StatsCard
+          title="Ingresos netos (mes)"
+          value={formatCurrency(stats.monthNetIncome)}
+          iconName="TrendingUp"
+          iconColor="text-emerald-500"
+          iconBgColor="bg-emerald-100"
+          trend={{
+            value: stats.netIncomeGrowth,
+            isPositive: stats.netIncomeGrowth >= 0,
+          }}
         />
         <StatsCard
           title="Clientes"

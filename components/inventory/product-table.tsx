@@ -204,7 +204,38 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
     if (!deleteProductId) return
 
     try {
-      const { error } = await supabase.from("products").delete().eq("id", deleteProductId)
+      // First check if the product is referenced in any sale_items
+      const { data: saleItems, error: checkError } = await supabase
+        .from("sale_items")
+        .select("id")
+        .eq("product_id", deleteProductId)
+        .limit(1)
+      
+      if (checkError) throw checkError
+      
+      // If product is referenced in sales, show a more specific error
+      if (saleItems && saleItems.length > 0) {
+        toast({
+          title: "No se puede eliminar",
+          description: "Este producto está asociado a ventas existentes. No puede ser eliminado.",
+          variant: "destructive",
+        })
+        return
+      }
+      
+      // Delete inventory records first
+      const { error: inventoryError } = await supabase
+        .from("inventory")
+        .delete()
+        .eq("product_id", deleteProductId)
+        
+      if (inventoryError) throw inventoryError
+
+      // Then delete the product
+      const { error } = await supabase
+        .from("products")
+        .delete()
+        .eq("id", deleteProductId)
 
       if (error) throw error
 
@@ -215,7 +246,7 @@ export function ProductTable({ initialProducts }: { initialProducts: Product[] }
       console.error("Error deleting product:", error)
       toast({
         title: "Error",
-        description: "Ocurrió un error al eliminar el producto",
+        description: "Ocurrió un error al eliminar el producto. Puede estar referenciado en otras tablas.",
         variant: "destructive",
       })
     } finally {

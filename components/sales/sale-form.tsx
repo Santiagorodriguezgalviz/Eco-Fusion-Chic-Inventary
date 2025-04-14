@@ -10,9 +10,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Trash, Plus, Send, UserPlus, Check } from "lucide-react"
+import { Trash, Plus, Send, UserPlus, Check, Search, Package } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRealtimeSubscription } from "@/lib/supabase/realtime"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 
 // Modificar la interfaz de producto para que no incluya tallas
 interface Product {
@@ -71,7 +74,16 @@ export function SaleForm({
   const [customFinalPrice, setCustomFinalPrice] = useState<string>("") // Nuevo campo para precio final personalizado
   const [useFinalPrice, setUseFinalPrice] = useState<boolean>(false) // Toggle para usar precio final o descuento
   
+  // Add these new state variables for the searchable dropdown
+  const [open, setOpen] = useState(false)
+  const [productSearch, setProductSearch] = useState("")
+  
   const supabase = createClient()
+  
+  // Add this function to filter products based on search
+  const filteredProducts = products.filter(product => 
+    product.name.toLowerCase().includes(productSearch.toLowerCase())
+  )
   
   // Suscripción en tiempo real a cambios en clientes
   useRealtimeSubscription({
@@ -403,6 +415,7 @@ export function SaleForm({
     }
   }
 
+  // Modify the product selection UI to improve search functionality
   return (
     <div className="grid gap-6 md:grid-cols-2">
       <Card>
@@ -412,18 +425,71 @@ export function SaleForm({
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="product">Producto</Label>
-            <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecciona un producto" />
-              </SelectTrigger>
-              <SelectContent>
-                {products.map((product) => (
-                  <SelectItem key={product.id} value={product.id} disabled={product.stock <= 0}>
-                    {product.name} - {formatCurrency(product.price)} ({product.stock} disponibles)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            
+            <Popover open={open} onOpenChange={setOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={open}
+                  className="w-full justify-between h-10 px-3 py-2 text-sm"
+                >
+                  {selectedProduct
+                    ? products.find(product => product.id === selectedProduct)?.name
+                    : "Selecciona un producto"}
+                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start" side="bottom" sideOffset={5}>
+                <Command shouldFilter={false}>
+                  <CommandInput 
+                    placeholder="Buscar producto..." 
+                    className="h-10 border-b border-border/50"
+                    value={productSearch}
+                    onValueChange={setProductSearch}
+                    autoFocus={true}
+                  />
+                  <CommandEmpty>
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <Search className="h-10 w-10 text-muted-foreground mb-2 opacity-50" />
+                      <p className="text-sm text-muted-foreground">No se encontraron productos.</p>
+                    </div>
+                  </CommandEmpty>
+                  <CommandGroup className="max-h-[300px] overflow-auto p-1">
+                    {filteredProducts.map(product => (
+                      <div
+                        key={product.id}
+                        onClick={() => {
+                          setSelectedProduct(product.id);
+                          setOpen(false);
+                          setProductSearch("");
+                        }}
+                        className={cn(
+                          "flex items-center justify-between p-2 rounded-md transition-colors duration-200 cursor-pointer",
+                          "hover:bg-accent hover:text-accent-foreground",
+                          "focus:bg-accent focus:text-accent-foreground focus:outline-none",
+                          product.stock <= 0 ? "opacity-50 cursor-not-allowed bg-muted/50" : "hover:bg-accent"
+                        )}
+                        style={{ pointerEvents: product.stock <= 0 ? 'none' : 'auto' }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100">
+                            <Package className="h-4 w-4 text-emerald-600" />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{product.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {product.stock} {product.stock === 1 ? "disponible" : "disponibles"}
+                            </span>
+                          </div>
+                        </div>
+                        <span className="font-medium text-emerald-600">{formatCurrency(product.price)}</span>
+                      </div>
+                    ))}
+                  </CommandGroup>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           {selectedProduct && (

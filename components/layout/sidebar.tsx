@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BarChart3, Package, ShoppingCart, Truck, Menu, X, ShoppingBag, FileText, Users } from "lucide-react"
+import { BarChart3, Package, ShoppingCart, Truck, Menu, X, ShoppingBag, FileText, Users, DollarSign } from "lucide-react"
 import { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,12 @@ const routes = [
     color: "text-pink-500",
   },
   {
+    label: "Gastos",
+    icon: DollarSign,
+    href: "/expenses",
+    color: "text-red-500",
+  },
+  {
     label: "Clientes",
     icon: Users,
     href: "/customers",
@@ -45,6 +51,7 @@ const routes = [
     href: "/reports/sales",
     color: "text-emerald-500",
   },
+  
 ]
 
 export function Sidebar() {
