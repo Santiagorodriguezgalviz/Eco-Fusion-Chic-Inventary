@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Eye, Plus, Truck, FileText, Edit, Download, Search } from "lucide-react"
+import { Eye, Plus, Truck, FileText, Edit, Download, Search, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { formatCurrency, formatDateTime } from "@/lib/utils/date"
 import { Button } from "@/components/ui/button"
@@ -54,6 +54,10 @@ export function OrdersTable({
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
   const [showPdfDialog, setShowPdfDialog] = useState(false)
+  // Add these new state variables
+  const [orderToDelete, setOrderToDelete] = useState<Order | null>(null)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [activeFilter, setActiveFilter] = useState<"all" | "pending" | "completed">(
     initialFilter as "all" | "pending" | "completed",
   )
@@ -325,6 +329,59 @@ export function OrdersTable({
     }
   }
 
+  // Add this new function
+  const handleDeleteOrder = async () => {
+    if (!orderToDelete) return
+    
+    setIsDeleting(true)
+    
+    try {
+      // First delete the order items
+      const { error: deleteItemsError } = await supabase
+        .from("order_items")
+        .delete()
+        .eq("order_id", orderToDelete.id)
+      
+      if (deleteItemsError) {
+        console.error("Error eliminando items del pedido:", deleteItemsError)
+        throw deleteItemsError
+      }
+      
+      // Then delete the order
+      const { error: deleteOrderError } = await supabase
+        .from("orders")
+        .delete()
+        .eq("id", orderToDelete.id)
+      
+      if (deleteOrderError) {
+        console.error("Error eliminando pedido:", deleteOrderError)
+        throw deleteOrderError
+      }
+      
+      // Update local state
+      setOrders((prev) => prev.filter((order) => order.id !== orderToDelete.id))
+      
+      addNotification(
+        "Pedido eliminado", 
+        "El pedido ha sido eliminado permanentemente", 
+        "success"
+      )
+      
+      setShowDeleteDialog(false)
+      setOrderToDelete(null)
+    } catch (error) {
+      console.error("Error al eliminar el pedido:", error)
+      
+      toast({
+        title: "Error",
+        description: "No se pudo eliminar el pedido. Puede estar referenciado en otras tablas.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   // Filtrar pedidos por término de búsqueda
   const filteredOrders = orders.filter((order) => {
     const searchString = searchTerm.toLowerCase()
@@ -534,6 +591,20 @@ export function OrdersTable({
                               <span className="sr-only">Marcar como recibido</span>
                             </Button>
                           )}
+                          {/* Add delete button */}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setOrderToDelete(order)
+                              setShowDeleteDialog(true)
+                            }}
+                            className="hover:bg-emerald-50"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                            <span className="sr-only">Eliminar pedido</span>
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -630,6 +701,48 @@ export function OrdersTable({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>¿Estás seguro?</DialogTitle>
+            <DialogDescription>
+              Esta acción no se puede deshacer. Esto eliminará permanentemente
+              el pedido y todos sus datos asociados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            {orderToDelete && (
+              <>
+                <p className="font-medium">Detalles del pedido a eliminar:</p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  <li><span className="font-medium">Referencia:</span> {orderToDelete.reference || "Sin referencia"}</li>
+                  <li><span className="font-medium">Fecha:</span> {formatDateTime(orderToDelete.created_at)}</li>
+                  <li><span className="font-medium">Total:</span> {formatCurrency(orderToDelete.total_cost)}</li>
+                </ul>
+              </>
+            )}
+          </div>
+          <DialogFooter className="flex flex-row justify-end gap-2 sm:justify-end">
+            <Button 
+              variant="outline" 
+              onClick={() => setShowDeleteDialog(false)}
+              disabled={isDeleting}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteOrder}
+              disabled={isDeleting}
+            >
+              {isDeleting ? "Eliminando..." : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
+  

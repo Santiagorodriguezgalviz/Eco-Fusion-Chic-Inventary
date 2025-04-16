@@ -10,7 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CustomCalendar } from "@/components/ui/custom-calendar"
 import { useToast } from "@/components/ui/use-toast"
 import { createClient } from "@/lib/supabase/client"
-import { generateSalesReportPDF, downloadPDF } from "@/lib/services/pdf-service"
+// Use the new modular PDF services
+import { generateSalesReportPDF, downloadPDF } from "@/lib/services/pdf"
 
 type ReportPeriod = "day" | "week" | "month" | "custom"
 
@@ -99,7 +100,7 @@ export function SalesReportPanel() {
 
           const items = itemsData.map((item) => ({
             product_name: item.products.name,
-            size_name: item.sizes.name,
+            size_name: item.sizes?.name || "N/A", // Add null check with fallback value
             quantity: item.quantity,
             price: item.price,
             subtotal: item.subtotal,

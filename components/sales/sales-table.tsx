@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Eye, Plus, Send, FileText, Calendar } from "lucide-react"
+import { Eye, Plus, Send, FileText, Calendar, RefreshCcw } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { formatCurrency, formatDateTime, getDateRange } from "@/lib/utils/date"
 import { Button } from "@/components/ui/button"
@@ -70,6 +70,9 @@ export function SalesTable({
   )
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null)
+  const [showReturnDialog, setShowReturnDialog] = useState(false)
+  const [saleToReturn, setSaleToReturn] = useState<Sale | null>(null)
+  const [isProcessingReturn, setIsProcessingReturn] = useState(false)
   
   const supabase = createClient()
 
@@ -425,6 +428,207 @@ export function SalesTable({
     addNotification("Exportación completada", "Se ha generado el reporte de todas las ventas", "success")
   }
 
+  // New function to handle product returns
+  // Función para manejar devoluciones de productos
+  const handleReturnSale = async () => {
+    if (!saleToReturn) return
+    
+    setIsProcessingReturn(true)
+    
+    try {
+      console.log("Iniciando proceso de devolución para la venta:", saleToReturn.id)
+      
+      // 1. Obtener los items de la venta para devolverlos al inventario
+      const { data: saleItems, error: itemsError } = await supabase
+        .from("sale_items")
+        .select(`
+          id,
+          product_id,
+          size_id,
+          quantity,
+          products (id, name, stock)
+        `)
+        .eq("sale_id", saleToReturn.id)
+      
+      if (itemsError) {
+        console.error("Error al obtener los items de la venta:", itemsError)
+        throw itemsError
+      }
+      
+      if (!saleItems || saleItems.length === 0) {
+        throw new Error("No se encontraron productos para esta venta")
+      }
+      
+      console.log("Items encontrados para devolver:", saleItems)
+      
+      // 2. Devolver cada item al inventario
+      for (const item of saleItems) {
+        // Verificar si el producto existe
+        if (!item.product_id) {
+          console.warn("Omitiendo item sin product_id:", item)
+          continue
+        }
+        
+        console.log(`Procesando devolución del producto ${item.product_id}, talla ${item.size_id || 'única'}, cantidad ${item.quantity}`)
+        
+        try {
+          // Primero, actualizar el stock directamente en la tabla de productos
+          const { data: productData, error: productError } = await supabase
+            .from("products")
+            .select("stock")
+            .eq("id", item.product_id)
+            .single()
+            
+          if (productError) {
+            console.error("Error al obtener el producto:", productError)
+            continue // Continuar con el siguiente item si hay error
+          }
+          
+          // Actualizar el stock del producto
+          const currentStock = productData.stock || 0
+          const newStock = currentStock + item.quantity
+          
+          const { error: updateProductError } = await supabase
+            .from("products")
+            .update({ 
+              stock: newStock,
+              updated_at: new Date().toISOString() 
+            })
+            .eq("id", item.product_id)
+            
+          if (updateProductError) {
+            console.error("Error al actualizar el stock del producto:", updateProductError)
+            continue // Continuar con el siguiente item si hay error
+          }
+          
+          console.log(`Stock del producto actualizado correctamente. Nuevo stock: ${newStock}`)
+          
+          // Solo si tiene size_id, actualizar también el inventario detallado
+          if (item.size_id) {
+            // Verificar si existe registro en inventario
+            let inventoryQuery = supabase
+              .from("inventory")
+              .select("id, stock")
+              .eq("product_id", item.product_id)
+              .eq("size_id", item.size_id)
+            
+            const { data: inventoryData, error: inventoryError } = await inventoryQuery.single()
+            
+            if (inventoryError && inventoryError.code !== 'PGRST116') {
+              console.error("Error al verificar inventario:", inventoryError)
+              // No lanzamos error, continuamos con el siguiente item
+              continue
+            }
+            
+            if (inventoryData) {
+              // Actualizar registro existente en inventario
+              console.log(`Actualizando inventario: stock actual ${inventoryData.stock} + cantidad devuelta ${item.quantity}`)
+              const nuevoStock = inventoryData.stock + item.quantity
+              
+              const { error: updateError } = await supabase
+                .from("inventory")
+                .update({ 
+                  stock: nuevoStock,
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", inventoryData.id)
+              
+              if (updateError) {
+                console.error("Error al actualizar inventario:", updateError)
+                // No lanzamos error, ya actualizamos el stock principal
+              } else {
+                console.log(`Inventario actualizado correctamente. Nuevo stock: ${nuevoStock}`)
+              }
+            } else {
+              // Crear nuevo registro en inventario si no existe
+              console.log(`Creando nuevo registro en inventario con cantidad ${item.quantity}`)
+              const { error: insertError } = await supabase
+                .from("inventory")
+                .insert({
+                  product_id: item.product_id,
+                  size_id: item.size_id,
+                  stock: item.quantity,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+              
+              if (insertError) {
+                console.error("Error al insertar en inventario:", insertError)
+                // No lanzamos error, ya actualizamos el stock principal
+              } else {
+                console.log("Nuevo registro de inventario creado correctamente")
+              }
+            }
+          }
+        } catch (itemError) {
+          console.error(`Error procesando el item ${item.product_id}:`, itemError)
+          // Continuamos con el siguiente item en lugar de abortar todo el proceso
+        }
+      }
+      
+      // 3. Eliminar primero los items de la venta
+      console.log("Eliminando items de la venta...")
+      const { error: deleteItemsError } = await supabase
+        .from("sale_items")
+        .delete()
+        .eq("sale_id", saleToReturn.id)
+      
+      if (deleteItemsError) {
+        console.error("Error al eliminar items de la venta:", deleteItemsError)
+        throw deleteItemsError
+      }
+      
+      // 4. Eliminar la venta completamente
+      console.log("Eliminando la venta...")
+      const { error: deleteSaleError } = await supabase
+        .from("sales")
+        .delete()
+        .eq("id", saleToReturn.id)
+      
+      if (deleteSaleError) {
+        console.error("Error al eliminar la venta:", deleteSaleError)
+        throw deleteSaleError
+      }
+      
+      // 5. Eliminar la venta del estado local
+      setSales((prev) => prev.filter((sale) => sale.id !== saleToReturn.id))
+      
+      // 6. Mostrar mensaje de éxito
+      toast({
+        title: "Devolución completada",
+        description: "Los productos han sido devueltos al inventario correctamente",
+      })
+      
+      addNotification(
+        "Devolución procesada",
+        `La factura ${saleToReturn.invoice_number} ha sido procesada como devolución y los productos han vuelto al inventario`,
+        "success"
+      )
+    } catch (error) {
+      console.error("Error al procesar la devolución:", error)
+      // Añadir información detallada del error
+      if (error instanceof Error) {
+        console.error("Detalles del error:", {
+          message: error.message,
+          name: error.name,
+          stack: error.stack
+        });
+      } else {
+        console.error("Tipo de error desconocido:", typeof error);
+      }
+      
+      toast({
+        title: "Error",
+        description: "No se pudo procesar la devolución. Por favor, inténtalo de nuevo.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsProcessingReturn(false)
+      setShowReturnDialog(false)
+      setSaleToReturn(null)
+    }
+  }
+
   // Update the columns definition to correctly show product information in the Prenda column
   const columns = [
     {
@@ -542,7 +746,7 @@ export function SalesTable({
         columns={columns}
         searchKey="invoice_number"
         onRowClick={(row) => router.push(`/sales/${row.id}`)}
-        // Replace the actions section in the DataTable component
+        // Update the actions section to include the return button
         actions={(row) => (
           <div className="flex justify-end gap-2">
             <Button 
@@ -573,6 +777,19 @@ export function SalesTable({
             >
               <FileText className="h-4 w-4" />
               <span className="sr-only">Ver factura</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => {
+                e.stopPropagation()
+                setSaleToReturn(row)
+                setShowReturnDialog(true)
+              }}
+              title="Procesar devolución"
+            >
+              <RefreshCcw className="h-4 w-4" />
+              <span className="sr-only">Procesar devolución</span>
             </Button>
             {row.customer && row.customer.phone && (
               <Button
@@ -734,6 +951,64 @@ export function SalesTable({
               onClick={handleDeleteSale}
             >
               Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de confirmación para devolución */}
+      <Dialog open={showReturnDialog} onOpenChange={setShowReturnDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Procesar devolución</DialogTitle>
+            <DialogDescription>
+              Esta acción procesará una devolución para la factura {saleToReturn?.invoice_number}.
+              Los productos serán devueltos al inventario y la venta será eliminada del sistema.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {saleToReturn && (
+            <div className="py-4">
+              <div className="text-sm font-medium mb-2">Productos a devolver:</div>
+              <div className="max-h-40 overflow-y-auto border rounded-md p-2">
+                {saleToReturn.items.map((item, index) => (
+                  <div key={index} className="flex justify-between py-1 border-b last:border-0">
+                    <div>{item.product_name}</div>
+                    <div className="text-muted-foreground">{item.quantity} unidad(es)</div>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-4 flex items-center justify-between">
+                <div className="text-sm font-medium">Total a reembolsar:</div>
+                <div className="text-lg font-bold text-green-600">{formatCurrency(saleToReturn.total_amount)}</div>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter className="flex flex-row justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowReturnDialog(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleReturnSale}
+              disabled={isProcessingReturn}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {isProcessingReturn ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Procesando...
+                </>
+              ) : (
+                <>
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  Procesar devolución
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
