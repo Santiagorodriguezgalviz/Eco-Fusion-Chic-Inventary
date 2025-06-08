@@ -1,17 +1,18 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Bell, Check, Trash2, ShoppingCart, Package, AlertTriangle } from "lucide-react"
+import { Bell, Check, Trash2, ShoppingCart, Package, AlertTriangle, WifiOff } from "lucide-react"
 import { useNotifications } from "@/contexts/notification-context"
 import type { Notification, NotificationType } from "@/lib/services/notification-service"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<"all" | "inventory" | "sales" | "orders">("all")
-  const { notifications, unreadCount, loading, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } =
+  const { notifications, unreadCount, loading, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications, error, refreshNotifications } =
     useNotifications()
   const notificationRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
@@ -120,6 +121,25 @@ export function NotificationCenter() {
       ))
   }
 
+  // Renderizar estado de error
+  const renderErrorState = () => {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <WifiOff className="mb-2 h-10 w-10 text-gray-400" />
+        <h4 className="mb-1 text-sm font-medium text-gray-700">Error de conexión</h4>
+        <p className="mb-4 text-xs text-gray-500">No se pudieron cargar las notificaciones</p>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => refreshNotifications && refreshNotifications()}
+          className="text-xs"
+        >
+          Reintentar
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="relative" ref={notificationRef}>
       {/* Botón de notificaciones */}
@@ -146,6 +166,7 @@ export function NotificationCenter() {
                 onClick={() => markAllAsRead()}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100"
                 title="Marcar todas como leídas"
+                disabled={loading || error !== null}
               >
                 <Check className="h-5 w-5" />
               </button>
@@ -153,6 +174,7 @@ export function NotificationCenter() {
                 onClick={() => deleteAllNotifications()}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100"
                 title="Eliminar todas"
+                disabled={loading || error !== null}
               >
                 <Trash2 className="h-5 w-5" />
               </button>
@@ -166,6 +188,7 @@ export function NotificationCenter() {
                 activeTab === "all" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-600"
               }`}
               onClick={() => setActiveTab("all")}
+              disabled={loading || error !== null}
             >
               Todas
             </button>
@@ -174,6 +197,7 @@ export function NotificationCenter() {
                 activeTab === "inventory" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-600"
               }`}
               onClick={() => setActiveTab("inventory")}
+              disabled={loading || error !== null}
             >
               Inventario
             </button>
@@ -182,6 +206,7 @@ export function NotificationCenter() {
                 activeTab === "sales" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-600"
               }`}
               onClick={() => setActiveTab("sales")}
+              disabled={loading || error !== null}
             >
               Ventas
             </button>
@@ -190,6 +215,7 @@ export function NotificationCenter() {
                 activeTab === "orders" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-600"
               }`}
               onClick={() => setActiveTab("orders")}
+              disabled={loading || error !== null}
             >
               Pedidos
             </button>
@@ -199,6 +225,8 @@ export function NotificationCenter() {
           <div className="max-h-80 overflow-y-auto p-3">
             {loading ? (
               renderSkeletons()
+            ) : error ? (
+              renderErrorState()
             ) : filteredNotifications.length > 0 ? (
               filteredNotifications.map(renderNotification)
             ) : (

@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Eye, EyeOff, LogIn } from "lucide-react"
+import { Eye, EyeOff, LogIn, WifiOff, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 
@@ -24,18 +24,43 @@ export function LoginForm() {
   const [loginAttempts, setLoginAttempts] = useState(0)
   const [cooldownActive, setCooldownActive] = useState(false)
   const [cooldownTime, setCooldownTime] = useState(0)
+  const [networkError, setNetworkError] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
   const supabase = createClient()
 
-  // Check for existing session on component mount
+  // Check for network status on component mount
   useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+    
+    // Set initial state
+    setIsOffline(!navigator.onLine)
+    
+    // Add event listeners
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    
+    // Check for existing session
     const checkSession = async () => {
-      const { data } = await supabase.auth.getSession()
-      if (data.session) {
-        router.push("/")
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (data.session) {
+          router.push("/")
+        }
+      } catch (error) {
+        console.error("Error checking session:", error)
       }
     }
     
-    checkSession()
+    if (navigator.onLine) {
+      checkSession()
+    }
+    
+    // Cleanup event listeners
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
   }, [router, supabase])
 
   // Handle cooldown timer
@@ -59,17 +84,28 @@ export function LoginForm() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
+    // Reset network error state when user makes changes
+    if (networkError) {
+      setNetworkError(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
   
     if (isLoading) {
-      console.log("handleSubmit bloqueado porque isLoading está activo")
       return
     }
-  
-    console.log("handleSubmit ejecutado")
+    
+    // Check if user is offline
+    if (isOffline) {
+      toast({
+        title: "Sin conexión a internet",
+        description: "No es posible iniciar sesión sin conexión a internet",
+        variant: "destructive",
+      })
+      return
+    }
   
     // Check if cooldown is active
     if (cooldownActive) {
@@ -82,51 +118,83 @@ export function LoginForm() {
     }
   
     setIsLoading(true)
+    setNetworkError(false)
   
     try {
-      // Clear any existing sessions first to avoid token conflicts
-      await supabase.auth.signOut()
-  
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
-      })
-  
-      if (error) {
-        // Handle rate limit error specifically
-        if (error.message.includes("rate limit") || error.status === 429) {
-          setCooldownActive(true)
-          setCooldownTime(30) // 30 seconds cooldown
-          throw new Error("Has excedido el límite de intentos. Por favor espera 30 segundos antes de intentar nuevamente.")
-        }
-  
-        // Track failed login attempts
-        setLoginAttempts(prev => {
-          const newAttempts = prev + 1
-          if (newAttempts >= 5) {
-            setCooldownActive(true)
-            setCooldownTime(60) // 1 minute cooldown after 5 attempts
-          }
-          return newAttempts
-        })
-  
-        throw error
+      // Try to sign out first to clear any existing sessions
+      try {
+        await supabase.auth.signOut()
+      } catch (signOutError) {
+        console.error("Error during sign out:", signOutError)
+        // Continue with login attempt even if sign out fails
       }
   
-      // Reset login attempts on successful login
-      setLoginAttempts(0)
-  
-      toast({
-        title: "Inicio de sesión exitoso",
-        description: "Bienvenido a Eco Fusion Chic",
-      })
-  
-      router.refresh()
-      router.push("/")
+      // Attempt to sign in with password
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        })
+        
+        if (error) {
+          // Handle rate limit error specifically
+          if (error.message.includes("rate limit") || error.status === 429) {
+            setCooldownActive(true)
+            setCooldownTime(30) // 30 seconds cooldown
+            throw new Error("Has excedido el límite de intentos. Por favor espera 30 segundos antes de intentar nuevamente.")
+          }
+    
+          // Track failed login attempts
+          setLoginAttempts(prev => {
+            const newAttempts = prev + 1
+            if (newAttempts >= 5) {
+              setCooldownActive(true)
+              setCooldownTime(60) // 1 minute cooldown after 5 attempts
+            }
+            return newAttempts
+          })
+    
+          throw error
+        }
+    
+        // Reset login attempts on successful login
+        setLoginAttempts(0)
+    
+        toast({
+          title: "Inicio de sesión exitoso",
+          description: "Bienvenido a Eco Fusion Chic",
+        })
+    
+        router.refresh()
+        router.push("/")
+      } catch (fetchError: any) {
+        // Handle network errors specifically
+        if (fetchError.message === "Failed to fetch" || 
+            fetchError.name === "TypeError" || 
+            fetchError.message.includes("network") ||
+            fetchError.message.includes("conexión")) {
+          setNetworkError(true)
+          throw new Error("Error de conexión. Por favor verifica tu conexión a internet o inténtalo más tarde.")
+        }
+        throw fetchError
+      }
     } catch (error: any) {
+      // Translate common error messages to Spanish
+      let errorMessage = error.message || "Verifica tus credenciales e intenta nuevamente"
+      
+      if (errorMessage.includes("Credenciales de inicio de sesión inválida")) {
+        errorMessage = "Credenciales de inicio de sesión inválidas"
+      } else if (errorMessage.includes("Email not confirmed")) {
+        errorMessage = "Correo electrónico no confirmado. Por favor revisa tu bandeja de entrada"
+      } else if (errorMessage.includes("User not found")) {
+        errorMessage = "Usuario no encontrado"
+      } else if (errorMessage.includes("Failed to fetch")) {
+        errorMessage = "Error de conexión. Por favor verifica tu conexión a internet"
+      }
+      
       toast({
         title: "Error al iniciar sesión",
-        description: error.message || "Verifica tus credenciales e intenta nuevamente",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -134,9 +202,13 @@ export function LoginForm() {
     }
   }
   
-
   const toggleShowPassword = () => {
     setShowPassword(!showPassword)
+  }
+
+  const retryConnection = () => {
+    setNetworkError(false)
+    handleSubmit(new Event('submit') as any)
   }
 
   return (
@@ -168,10 +240,34 @@ export function LoginForm() {
             <p className="mt-2 text-gray-600">Inicia sesión para acceder a tu cuenta</p>
           </div>
 
+          {isOffline && (
+            <div className="mb-4 rounded-md bg-orange-50 p-4 text-center border border-orange-200">
+              <AlertCircle className="mx-auto h-8 w-8 text-orange-500 mb-2" />
+              <p className="font-medium text-orange-800">Sin conexión a internet</p>
+              <p className="text-sm text-orange-700 mb-3">No es posible iniciar sesión sin conexión a internet</p>
+            </div>
+          )}
+
           {cooldownActive && (
             <div className="mb-4 rounded-md bg-amber-50 p-3 text-center text-amber-800 border border-amber-200">
               <p className="font-medium">Demasiados intentos de inicio de sesión</p>
               <p className="text-sm">Por favor espera {cooldownTime} segundos antes de intentar nuevamente</p>
+            </div>
+          )}
+
+          {networkError && !isOffline && (
+            <div className="mb-4 rounded-md bg-red-50 p-4 text-center border border-red-200">
+              <WifiOff className="mx-auto h-8 w-8 text-red-400 mb-2" />
+              <p className="font-medium text-red-800">Error de conexión</p>
+              <p className="text-sm text-red-700 mb-3">No se pudo conectar con el servidor de autenticación</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={retryConnection}
+                className="bg-white hover:bg-gray-50 border-red-300 text-red-700 text-xs"
+              >
+                Reintentar conexión
+              </Button>
             </div>
           )}
 
@@ -229,7 +325,7 @@ export function LoginForm() {
             <Button
               type="submit"
               className="h-12 w-full bg-emerald-600 text-white hover:bg-emerald-700"
-              disabled={isLoading || cooldownActive}
+              disabled={isLoading || cooldownActive || isOffline}
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">

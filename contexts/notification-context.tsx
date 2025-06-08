@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from "
 import { notificationService, type Notification } from "@/lib/services/notification-service"
 import { useToast } from "@/components/ui/use-toast"
 
+// Add these to your context interface
 interface NotificationContextType {
   notifications: Notification[]
   unreadCount: number
@@ -11,7 +12,8 @@ interface NotificationContextType {
   markAllAsRead: () => Promise<void>
   deleteNotification: (id: string) => Promise<void>
   deleteAllNotifications: () => Promise<void>
-  refreshNotifications: () => Promise<void>
+  error: Error | null;
+  refreshNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined)
@@ -150,7 +152,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     refreshNotifications,
   }
 
-  return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>
+  return <NotificationContext.Provider value={{ ...value, error: null }}>{children}</NotificationContext.Provider>
 }
 
 export function useNotifications() {
